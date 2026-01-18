@@ -5,9 +5,9 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { TextShimmer } from '@/components/ui/text-shimmer';
 import { TextScramble } from '@/components/ui/text-scramble';
-import { Key, Play, Loader2 } from 'lucide-react';
+import { Key } from 'lucide-react';
 import type { Variants } from 'framer-motion';
-import { uploadYouTubeVideo, processVideoUrl, generateApiKey } from '@/lib/api';
+import { generateApiKey } from '@/lib/api';
 import {
   Tooltip,
   TooltipContent,
@@ -26,7 +26,6 @@ import {
 export default function Page() {
     const [key, setKey] = useState(0);
     const [scrambleTrigger, setScrambleTrigger] = useState(false);
-    const [videoUrl, setVideoUrl] = useState("");
     const [rows, setRows] = useState([
         {
             id: `${Date.now()}-1`,
@@ -38,7 +37,6 @@ export default function Page() {
             height: 40, // Minimum row height
         }
     ]);
-    const [currentRowId, setCurrentRowId] = useState(`${Date.now()}-1`);
     const [animatingCells, setAnimatingCells] = useState<Record<string, Record<string, boolean>>>({});
     const [isLoading, setIsLoading] = useState(false);
     const [draggedRow, setDraggedRow] = useState<string | null>(null);
@@ -54,9 +52,8 @@ export default function Page() {
         status: 20,
         keyTopics: 20,
     });
-    const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
     const [showCopiedTooltip, setShowCopiedTooltip] = useState(false);
-    const [processingRows, setProcessingRows] = useState<Record<string, 'idle' | 'uploading' | 'processing' | 'completed' | 'error'>>({});
+    const [copiedUrlRowId, setCopiedUrlRowId] = useState<string | null>(null);
     const [apiKey, setApiKey] = useState<string>('');
 
     const extractVideoId = (url: string) => {
@@ -73,17 +70,28 @@ export default function Page() {
         return null;
     };
 
-    const fetchVideoData = async () => {
-        if (!videoUrl) return;
+    const fetchVideoData = async (url: string, rowId: string) => {
+        if (!url) return;
         
         setIsLoading(true);
 
         try {
             // Extract video ID from URL
-            const videoId = extractVideoId(videoUrl);
+            const videoId = extractVideoId(url);
             
             if (!videoId) {
                 throw new Error("Invalid YouTube URL");
+            }
+
+            // Check for duplicate video (same video ID already in another row)
+            const isDuplicate = rows.some(row => {
+                if (row.id === rowId) return false; // Skip the current row
+                const existingVideoId = extractVideoId(row.videoUrl);
+                return existingVideoId === videoId;
+            });
+
+            if (isDuplicate) {
+                throw new Error("This video is already in the table");
             }
 
             // Use YouTube Data API v3 to get accurate video information
@@ -112,8 +120,9 @@ export default function Page() {
             const duration = parseISO8601Duration(isoDuration);
             
             // Check if captions are available
+            // Note: YouTube API only reports uploaded/official captions, not auto-generated ones
             const hasCaptions = contentDetails.caption === "true";
-            const captionStatus = hasCaptions ? "✓ Captions" : "No captions";
+            const captionStatus = hasCaptions ? "✓ Captions" : "Auto CC";
             
             // Get view count for additional info
             const viewCount = statistics?.viewCount ? parseInt(statistics.viewCount).toLocaleString() + ' views' : 'N/A';
@@ -141,19 +150,50 @@ export default function Page() {
                 keyTopics: keyTopics,
             };
 
-            // Animate and populate the first row with YouTube data (fast)
-            await animateDataPopulation(videoInfo);
+            // Animate and populate the current row with YouTube data (fast)
+            await animateDataPopulation(videoInfo, rowId);
             
-            console.log('✅ First row populated, fetching related videos...');
+            console.log(`✅ Row ${rowId} populated`);
             
             // Enhance with Tavily in background (non-blocking)
-            enhanceKeyTopicsWithTavily(snippet.title, snippet.channelTitle, currentRowId);
+            enhanceKeyTopicsWithTavily(snippet.title, snippet.channelTitle, rowId);
             
-            // Immediately fetch and populate related videos in parallel
-            setTimeout(() => {
-                console.log('⏰ Timeout fired, calling fetchAndPopulateSuggestedVideos');
-                fetchAndPopulateSuggestedVideos(videoId, snippet.title);
-            }, 500);
+            // Only fetch suggested videos if:
+            // 1. We have less than 5 rows total (AI suggestions allowed)
+            // 2. This is the first video being entered
+            const shouldFetchSuggestions = rows.length < 5;
+            
+            if (shouldFetchSuggestions) {
+                console.log('🔍 Will fetch related videos (under 5 row limit)');
+                // Immediately fetch and populate related videos in parallel
+                setTimeout(() => {
+                    console.log('⏰ Timeout fired, calling fetchAndPopulateSuggestedVideos');
+                    fetchAndPopulateSuggestedVideos(videoId, snippet.title);
+                }, 500);
+            } else {
+                console.log('✋ Skipping suggestions - already at/over 5 rows');
+                // Add an empty row for next manual entry if this was the last empty row
+                setRows(prev => {
+                    const currentRowIndex = prev.findIndex(r => r.id === rowId);
+                    const isLastRow = currentRowIndex === prev.length - 1;
+                    
+                    if (isLastRow) {
+                        const emptyRowId = `${Date.now()}-empty`;
+                        const emptyRow = {
+                            id: emptyRowId,
+                            videoUrl: "",
+                            title: "",
+                            duration: "",
+                            status: "",
+                            keyTopics: "",
+                            height: 40,
+                        };
+                        console.log('➕ Added new empty row for manual input');
+                        return [...prev, emptyRow];
+                    }
+                    return prev;
+                });
+            }
 
         } catch (error) {
             console.error('Error fetching video data:', error);
@@ -162,7 +202,7 @@ export default function Page() {
                 duration: "0:00",
                 status: "Failed",
                 keyTopics: error instanceof Error ? error.message : "Error fetching data.",
-            });
+            }, rowId);
         } finally {
             setIsLoading(false);
         }
@@ -214,30 +254,15 @@ export default function Page() {
             // STRICT CHECK: Only auto-populate up to 5 rows total (1 original + 4 suggested)
             if (rows.length >= 5) {
                 console.log("🚫 ALREADY HAVE 5 OR MORE ROWS - NOT ADDING ANY SUGGESTIONS");
-                // Add one empty row for manual input only
-                const emptyRowId = `${Date.now()}-empty`;
-                const emptyRow = {
-                    id: emptyRowId,
-                    videoUrl: "",
-                    title: "",
-                    duration: "",
-                    status: "",
-                    keyTopics: "",
-                    height: 40,
-                };
-                setRows(prev => {
-                    // Double check before adding
-                    if (prev.length >= 5) {
-                        console.log("⚠️ Double-checked: Already at 5 rows, only adding empty row");
-                    }
-                    return [...prev, emptyRow];
-                });
-                return;
+                return; // Don't add anything, not even an empty row
             }
 
             console.log('🔍 Fetching related videos for:', videoTitle);
             
             // Use Tavily to find similar YouTube videos (finds the URLs)
+            // Extract key terms from title for better search
+            const searchQuery = `"${videoTitle}" related YouTube videos same topic`;
+            
             const tavilyResponse = await fetch('https://api.tavily.com/search', {
                 method: 'POST',
                 headers: {
@@ -245,9 +270,9 @@ export default function Page() {
                 },
                 body: JSON.stringify({
                     api_key: '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',
-                    query: `Find other YouTube videos similar to "${videoTitle}". Show me different related videos on the same topic LITERALLY SIMILAR VIDEOS, imagine basically watching the same video multiple times.`,
-                    search_depth: 'basic',
-                    max_results: 10,
+                    query: searchQuery,
+                    search_depth: 'advanced',
+                    max_results: 15,
                     include_domains: ['youtube.com', 'youtu.be'],
                 })
             });
@@ -259,16 +284,25 @@ export default function Page() {
                 return;
             }
 
-            // Extract YouTube URLs and filter out duplicates
-            const existingUrls = rows.map(row => row.videoUrl);
+            // Extract YouTube URLs and filter out duplicates BY VIDEO ID (not URL)
+            // This catches duplicates even with different URL formats (youtube.com vs youtu.be)
+            const existingVideoIds = new Set(
+                rows.map(row => extractVideoId(row.videoUrl)).filter(Boolean)
+            );
+            existingVideoIds.add(originalVideoId); // Also exclude the original video
+            
+            const seenVideoIds = new Set<string>(); // Track IDs within this batch too
             const suggestedUrls = tavilyData.results
                 .map((result: any) => result.url)
                 .filter((url: string) => {
                     const videoId = extractVideoId(url);
-                    return videoId && 
-                           (url.includes('youtube.com/watch') || url.includes('youtu.be/')) &&
-                           !existingUrls.includes(url) &&
-                           videoId !== originalVideoId;
+                    if (!videoId) return false;
+                    if (!(url.includes('youtube.com/watch') || url.includes('youtu.be/'))) return false;
+                    if (existingVideoIds.has(videoId)) return false; // Already in table
+                    if (seenVideoIds.has(videoId)) return false; // Already in this batch
+                    
+                    seenVideoIds.add(videoId); // Mark as seen
+                    return true;
                 })
                 .slice(0, 4); // Get up to 4 suggestions MAX
 
@@ -318,50 +352,53 @@ export default function Page() {
 
             // Process each video sequentially (one by one)
             for (let i = 0; i < maxRowsToAdd; i++) {
-                // SAFETY: Re-check on each iteration
+                const video = batchData.items[i];
+                const videoId = video.id;
+                const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                const snippet = video.snippet;
+                const contentDetails = video.contentDetails;
+                
+                // Parse duration
+                const isoDuration = contentDetails.duration;
+                const duration = parseISO8601Duration(isoDuration);
+                
+                // Check if captions are available
+                // Note: YouTube API only reports uploaded/official captions, not auto-generated ones
+                const hasCaptions = contentDetails.caption === "true";
+                const captionStatus = hasCaptions ? "✓ Captions" : "Auto CC";
+                
+                // Extract key topics
+                let keyTopics = '';
+                if (snippet.description) {
+                    keyTopics = snippet.description
+                        .split('\n')[0]
+                        .substring(0, 200)
+                        .trim();
+                    
+                    if (!keyTopics.endsWith('.') && !keyTopics.endsWith('!') && !keyTopics.endsWith('?')) {
+                        keyTopics += '...';
+                    }
+                } else {
+                    keyTopics = `Video by ${snippet.channelTitle} covering topics related to ${snippet.title.substring(0, 50)}.`;
+                }
+
+                const videoInfo = {
+                    title: snippet.title || "Video Title",
+                    duration: duration,
+                    status: captionStatus,
+                    keyTopics: keyTopics,
+                };
+
+                // Generate rowId BEFORE adding so we can track it for animation
+                const rowId = `${Date.now()}-${i + 2}-${Math.random()}`;
+                
+                // Add empty row first
                 setRows(prev => {
                     if (prev.length >= 5) {
                         console.log(`🚫 LOOP SAFETY: Already at ${prev.length} rows, stopping at iteration ${i}`);
-                        return prev; // Don't add anything
+                        return prev;
                     }
                     
-                    const video = batchData.items[i];
-                    const videoId = video.id;
-                    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-                    const snippet = video.snippet;
-                    const contentDetails = video.contentDetails;
-                    
-                    // Parse duration
-                    const isoDuration = contentDetails.duration;
-                    const duration = parseISO8601Duration(isoDuration);
-                    
-                    // Check if captions are available
-                    const hasCaptions = contentDetails.caption === "true";
-                    const captionStatus = hasCaptions ? "✓ Captions" : "No captions";
-                    
-                    // Extract key topics
-                    let keyTopics = '';
-                    if (snippet.description) {
-                        keyTopics = snippet.description
-                            .split('\n')[0]
-                            .substring(0, 200)
-                            .trim();
-                        
-                        if (!keyTopics.endsWith('.') && !keyTopics.endsWith('!') && !keyTopics.endsWith('?')) {
-                            keyTopics += '...';
-                        }
-                    } else {
-                        keyTopics = `Video by ${snippet.channelTitle} covering topics related to ${snippet.title.substring(0, 50)}.`;
-                    }
-
-                    const videoInfo = {
-                        title: snippet.title || "Video Title",
-                        duration: duration,
-                        status: captionStatus,
-                        keyTopics: keyTopics,
-                    };
-
-                    const rowId = `${Date.now()}-${prev.length + 1}-${Math.random()}`;
                     const newRow = {
                         id: rowId,
                         videoUrl: videoUrl,
@@ -372,57 +409,28 @@ export default function Page() {
                         height: 40,
                     };
                     
-                    console.log(`➕ Adding row ${prev.length + 1}`);
+                    console.log(`➕ Adding row with id ${rowId}`);
                     return [...prev, newRow];
                 });
 
-                // Wait before adding next row (staggered effect)
-                await new Promise(resolve => setTimeout(resolve, 700));
+                // Wait for row to appear
+                await new Promise(resolve => setTimeout(resolve, 300));
 
-                // Animate the row we just added
-                const currentRows = [...rows];
-                const justAddedRow = currentRows[currentRows.length - 1];
-                if (justAddedRow) {
-                    const video = batchData.items[i];
-                    const snippet = video.snippet;
-                    const contentDetails = video.contentDetails;
-                    
-                    const isoDuration = contentDetails.duration;
-                    const duration = parseISO8601Duration(isoDuration);
-                    const hasCaptions = contentDetails.caption === "true";
-                    const captionStatus = hasCaptions ? "✓ Captions" : "No captions";
-                    
-                    let keyTopics = '';
-                    if (snippet.description) {
-                        keyTopics = snippet.description.split('\n')[0].substring(0, 200).trim();
-                        if (!keyTopics.endsWith('.') && !keyTopics.endsWith('!') && !keyTopics.endsWith('?')) {
-                            keyTopics += '...';
-                        }
-                    } else {
-                        keyTopics = `Video by ${snippet.channelTitle} covering topics related to ${snippet.title.substring(0, 50)}.`;
-                    }
-
-                    const videoInfo = {
-                        title: snippet.title || "Video Title",
-                        duration: duration,
-                        status: captionStatus,
-                        keyTopics: keyTopics,
-                    };
-
-                    // Animate left to right
-                    const rowId = justAddedRow.id;
-                    const fields = ['title', 'duration', 'status', 'keyTopics'] as const;
-                    for (const field of fields) {
-                        setAnimatingCells(prev => ({ ...prev, [rowId]: { [field]: true } }));
-                        await new Promise(resolve => setTimeout(resolve, 200));
-                        setRows(prev => prev.map(r => r.id === rowId ? { ...r, [field]: videoInfo[field] } : r));
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                        setAnimatingCells(prev => ({ ...prev, [rowId]: {} }));
-                    }
-
-                    console.log(`✅ Completed row ${currentRowCount + i + 1}: ${videoInfo.title}`);
-                    enhanceKeyTopicsWithTavily(snippet.title, snippet.channelTitle, rowId);
+                // Animate the row using the known rowId (not stale state!)
+                const fields = ['title', 'duration', 'status', 'keyTopics'] as const;
+                for (const field of fields) {
+                    setAnimatingCells(prev => ({ ...prev, [rowId]: { [field]: true } }));
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    setRows(prev => prev.map(r => r.id === rowId ? { ...r, [field]: videoInfo[field] } : r));
+                    await new Promise(resolve => setTimeout(resolve, 80));
+                    setAnimatingCells(prev => ({ ...prev, [rowId]: {} }));
                 }
+
+                console.log(`✅ Completed row: ${videoInfo.title}`);
+                enhanceKeyTopicsWithTavily(snippet.title, snippet.channelTitle, rowId);
+                
+                // Small delay before next row
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
 
             // After populating suggested videos, add ONE empty row only if we have exactly 5 rows
@@ -465,15 +473,15 @@ export default function Page() {
         }
     };
 
-    const animateDataPopulation = async (data: any) => {
+    const animateDataPopulation = async (data: any, rowId: string) => {
         const fields = ['title', 'duration', 'status', 'keyTopics'];
         
         for (const field of fields) {
-            setAnimatingCells(prev => ({ ...prev, [currentRowId]: { [field]: true } }));
+            setAnimatingCells(prev => ({ ...prev, [rowId]: { [field]: true } }));
             await new Promise(resolve => setTimeout(resolve, 300));
-            updateRowData(currentRowId, { [field]: data[field] });
+            updateRowData(rowId, { [field]: data[field] });
             await new Promise(resolve => setTimeout(resolve, 100));
-            setAnimatingCells(prev => ({ ...prev, [currentRowId]: {} }));
+            setAnimatingCells(prev => ({ ...prev, [rowId]: {} }));
         }
     };
 
@@ -484,26 +492,20 @@ export default function Page() {
     };
 
     const handleUrlChange = (rowId: string, url: string) => {
-        setVideoUrl(url);
         updateRowData(rowId, { videoUrl: url });
-        setCurrentRowId(rowId);
     };
 
     const handleUrlBlur = async (rowId: string, url: string) => {
         // Auto-analyze when user finishes entering URL
         if (url && url.trim() !== '' && !isLoading) {
-            setCurrentRowId(rowId);
-            setVideoUrl(url);
-            await fetchVideoData();
+            await fetchVideoData(url, rowId);
         }
     };
 
     const handleKeyPress = async (e: React.KeyboardEvent, rowId: string, url: string) => {
         // Also trigger on Enter key
         if (e.key === 'Enter' && url && url.trim() !== '' && !isLoading) {
-            setCurrentRowId(rowId);
-            setVideoUrl(url);
-            await fetchVideoData();
+            await fetchVideoData(url, rowId);
         }
     };
 
@@ -614,52 +616,6 @@ export default function Page() {
         loadApiKey();
     }, []);
 
-    const handleUploadAndProcess = async (rowId: string, url: string, title?: string) => {
-        if (!url || !url.trim()) {
-            alert('Please enter a video URL first');
-            return;
-        }
-
-        setProcessingRows(prev => ({ ...prev, [rowId]: 'uploading' }));
-        updateRowData(rowId, { status: 'Uploading...' });
-
-        try {
-            // Step 1: Upload YouTube video to GCP
-            const uploadResponse = await uploadYouTubeVideo(url, title);
-            
-            if (!uploadResponse.success || !uploadResponse.gcpUrl) {
-                throw new Error('Failed to upload video to GCP');
-            }
-
-            setProcessingRows(prev => ({ ...prev, [rowId]: 'processing' }));
-            updateRowData(rowId, { status: 'Processing...' });
-
-            // Step 2: Process the video from GCP URL
-            const processResponse = await processVideoUrl(
-                uploadResponse.gcpUrl,
-                5, // frame interval
-                title || uploadResponse.title
-            );
-
-            // Update row with processed data
-            updateRowData(rowId, {
-                status: processResponse.status === 'completed' ? 'Completed' : processResponse.status,
-                title: processResponse.title || title || '',
-                duration: processResponse.duration,
-                keyTopics: processResponse.keyTopics || '',
-            });
-
-            setProcessingRows(prev => ({ ...prev, [rowId]: 'completed' }));
-        } catch (error) {
-            console.error('Error uploading/processing video:', error);
-            updateRowData(rowId, { 
-                status: 'Error',
-                keyTopics: error instanceof Error ? error.message : 'Failed to process video'
-            });
-            setProcessingRows(prev => ({ ...prev, [rowId]: 'error' }));
-        }
-    };
-
     const container: Variants = {
         hidden: { opacity: 0 },
         show: {
@@ -759,7 +715,7 @@ export default function Page() {
                             </TextShimmer>
                         </motion.div>
                         <motion.p variants={item} className="mb-6">
-                        Developers can&apos;t build apps on video content because there&apos;s no infrastructure to extract what&apos;s inside. Frame fixes this—send us a URL, get back JSON with transcript, products, topics, and key moments.
+                        Developers can&apos;t build apps on video content because there&apos;s no infrastructure to extract what&apos;s inside. Frame fixes this. Send us a URL, get back JSON with transcript, products, topics, and key moments.
                         </motion.p>
                         <motion.p variants={item}>
                             <TextScramble
@@ -781,7 +737,7 @@ export default function Page() {
                                                 className="h-9 py-2 text-[#737373] text-center relative" 
                                                 style={{ width: `${columnWidths.videoUrl}%` }}
                                             >
-                                                Video URL
+                                                video url
                                                 {/* Column Resize Handle */}
                                                 <div
                                                     onMouseDown={(e) => handleColumnMouseDown(e, 'videoUrl')}
@@ -791,15 +747,9 @@ export default function Page() {
                                             </TableHead>
                                             <TableHead 
                                                 className="h-9 py-2 text-[#737373] text-center relative" 
-                                                style={{ width: '10%' }}
-                                            >
-                                                Action
-                                            </TableHead>
-                                            <TableHead 
-                                                className="h-9 py-2 text-[#737373] text-center relative" 
                                                 style={{ width: `${columnWidths.title}%` }}
                                             >
-                                                Title
+                                                title
                                                 <div
                                                     onMouseDown={(e) => handleColumnMouseDown(e, 'title')}
                                                     className="absolute top-0 right-0 bottom-0 w-2 cursor-col-resize hover:bg-[#737373]/20 transition-colors z-10"
@@ -810,7 +760,7 @@ export default function Page() {
                                                 className="h-9 py-2 text-[#737373] text-center relative" 
                                                 style={{ width: `${columnWidths.duration}%` }}
                                             >
-                                                Duration
+                                                duration
                                                 <div
                                                     onMouseDown={(e) => handleColumnMouseDown(e, 'duration')}
                                                     className="absolute top-0 right-0 bottom-0 w-2 cursor-col-resize hover:bg-[#737373]/20 transition-colors z-10"
@@ -821,7 +771,7 @@ export default function Page() {
                                 className="h-9 py-2 text-[#737373] text-center relative" 
                                 style={{ width: `${columnWidths.status}%` }}
                             >
-                                Captions
+                                captions
                                 <div
                                     onMouseDown={(e) => handleColumnMouseDown(e, 'status')}
                                     className="absolute top-0 right-0 bottom-0 w-2 cursor-col-resize hover:bg-[#737373]/20 transition-colors z-10"
@@ -832,7 +782,7 @@ export default function Page() {
                                                 className="h-9 py-2 text-[#737373] text-center relative" 
                                                 style={{ width: `${columnWidths.keyTopics}%` }}
                                             >
-                                                Key Topics
+                                                key topics
                                                 <div
                                                     onMouseDown={(e) => handleColumnMouseDown(e, 'keyTopics')}
                                                     className="absolute top-0 right-0 bottom-0 w-2 cursor-col-resize hover:bg-[#737373]/20 transition-colors z-10"
@@ -852,50 +802,39 @@ export default function Page() {
                                                     className="font-medium text-white align-top relative" 
                                                     style={{ height: `${row.height}px`, width: `${columnWidths.videoUrl}%` }}
                                                 >
-                                                    <div className="h-full flex items-center justify-center px-2">
-                                                        <input
-                                                            type="text"
-                                                            value={row.videoUrl}
-                                                            onChange={(e) => handleUrlChange(row.id, e.target.value)}
-                                                            onBlur={(e) => handleUrlBlur(row.id, e.target.value)}
-                                                            onKeyPress={(e) => handleKeyPress(e, row.id, row.videoUrl)}
-                                                            onFocus={(e) => e.target.placeholder = ''}
-                                                            className="w-full bg-transparent border-none outline-none focus:outline-none text-white font-medium text-center placeholder:text-[#737373]"
-                                                            placeholder="Enter video URL"
-                                                            disabled={processingRows[row.id] === 'uploading' || processingRows[row.id] === 'processing'}
-                                                        />
-                                                    </div>
-                                                    {/* Row Resize Handle */}
-                                                    <div
-                                                        onMouseDown={(e) => handleMouseDown(e, row.id)}
-                                                        className="absolute bottom-0 left-0 right-0 h-2 cursor-row-resize hover:bg-[#737373]/20 transition-colors z-10"
-                                                        style={{ borderTop: draggedRow === row.id ? '2px solid #737373' : 'none' }}
-                                                    />
-                                                </TableCell>
-                                                <TableCell 
-                                                    className="text-[#a1a1aa] align-middle relative" 
-                                                    style={{ height: `${row.height}px`, width: '10%' }}
-                                                >
-                                                    <div className="h-full flex items-center justify-center px-2">
-                                                        <Button
-                                                            onClick={() => handleUploadAndProcess(row.id, row.videoUrl, row.title)}
-                                                            disabled={!row.videoUrl || processingRows[row.id] === 'uploading' || processingRows[row.id] === 'processing'}
-                                                            className="bg-[#2B2B2B] hover:bg-[#3a3a3a] text-white text-xs px-3 py-1 h-7"
-                                                            size="sm"
-                                                        >
-                                                            {processingRows[row.id] === 'uploading' || processingRows[row.id] === 'processing' ? (
-                                                                <>
-                                                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                                                    {processingRows[row.id] === 'uploading' ? 'Uploading' : 'Processing'}
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <Play className="w-3 h-3 mr-1" />
-                                                                    Process
-                                                                </>
-                                                            )}
-                                                        </Button>
-                                                    </div>
+                                                    <TooltipProvider>
+                                                        <Tooltip open={copiedUrlRowId === row.id}>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="h-full flex items-center justify-center px-2">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={row.videoUrl}
+                                                                        onChange={(e) => handleUrlChange(row.id, e.target.value)}
+                                                                        onBlur={(e) => handleUrlBlur(row.id, e.target.value)}
+                                                                        onKeyPress={(e) => handleKeyPress(e, row.id, row.videoUrl)}
+                                                                        onFocus={(e) => e.target.placeholder = ''}
+                                                                        onClick={async () => {
+                                                                            if (row.videoUrl) {
+                                                                                try {
+                                                                                    await navigator.clipboard.writeText(row.videoUrl);
+                                                                                    setCopiedUrlRowId(row.id);
+                                                                                    setTimeout(() => setCopiedUrlRowId(null), 2000);
+                                                                                } catch (error) {
+                                                                                    console.error('Failed to copy URL:', error);
+                                                                                }
+                                                                            }
+                                                                        }}
+                                                                        className="w-full bg-transparent border-none outline-none focus:outline-none text-white font-medium text-center placeholder:text-[#737373] cursor-pointer"
+                                                                        placeholder="enter url"
+                                                                        disabled={isLoading}
+                                                                    />
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent side="bottom">
+                                                                <p>copied to clipboard</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </TooltipProvider>
                                                     {/* Row Resize Handle */}
                                                     <div
                                                         onMouseDown={(e) => handleMouseDown(e, row.id)}
@@ -998,7 +937,7 @@ export default function Page() {
                                                 <Tooltip open={showCopiedTooltip}>
                                                     <TooltipTrigger asChild>
                                                         <TableCell 
-                                                            className="h-12 text-white text-center cursor-pointer font-mono text-xs" 
+                                                            className="h-12 text-white text-center cursor-pointer font-mono text-xs px-0" 
                                                             style={{ width: '85%' }}
                                                             onClick={async () => {
                                                                 if (apiKey) {
@@ -1012,7 +951,9 @@ export default function Page() {
                                                                 }
                                                             }}
                                                         >
-                                                            {apiKey || 'Generating...'}
+                                                            <div className="flex items-center justify-center h-full pt-1">
+                                                                {apiKey ? '*'.repeat(apiKey.length) : 'Generating...'}
+                                                            </div>
                                                         </TableCell>
                                                     </TooltipTrigger>
                                                     <TooltipContent side="bottom">
