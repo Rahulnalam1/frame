@@ -5,8 +5,9 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { TextShimmer } from '@/components/ui/text-shimmer';
 import { TextScramble } from '@/components/ui/text-scramble';
-import { Key } from 'lucide-react';
+import { Key, Play, Loader2 } from 'lucide-react';
 import type { Variants } from 'framer-motion';
+import { uploadYouTubeVideo, processVideoUrl, generateApiKey } from '@/lib/api';
 import {
   Tooltip,
   TooltipContent,
@@ -55,6 +56,8 @@ export default function Page() {
     });
     const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
     const [showCopiedTooltip, setShowCopiedTooltip] = useState(false);
+    const [processingRows, setProcessingRows] = useState<Record<string, 'idle' | 'uploading' | 'processing' | 'completed' | 'error'>>({});
+    const [apiKey, setApiKey] = useState<string>('');
 
     const extractVideoId = (url: string) => {
         // Extract video ID from various YouTube URL formats
@@ -579,6 +582,84 @@ export default function Page() {
         return () => clearTimeout(timer);
     }, [key]);
 
+    // Generate API key on mount
+    useEffect(() => {
+        const loadApiKey = async () => {
+            // Check localStorage first
+            const storedKey = localStorage.getItem('frame_api_key');
+            if (storedKey) {
+                setApiKey(storedKey);
+                return;
+            }
+
+            // Generate new key
+            try {
+                const response = await generateApiKey();
+                console.log('API key response:', response);
+                // Handle both camelCase and snake_case response formats
+                const key = response.apiKey || response.api_key || '';
+                if (key) {
+                    setApiKey(key);
+                    localStorage.setItem('frame_api_key', key);
+                } else {
+                    console.error('No API key in response:', response);
+                }
+            } catch (error) {
+                console.error('Error generating API key:', error);
+                // Set a placeholder so user knows something went wrong
+                setApiKey('Error generating key - check console');
+            }
+        };
+
+        loadApiKey();
+    }, []);
+
+    const handleUploadAndProcess = async (rowId: string, url: string, title?: string) => {
+        if (!url || !url.trim()) {
+            alert('Please enter a video URL first');
+            return;
+        }
+
+        setProcessingRows(prev => ({ ...prev, [rowId]: 'uploading' }));
+        updateRowData(rowId, { status: 'Uploading...' });
+
+        try {
+            // Step 1: Upload YouTube video to GCP
+            const uploadResponse = await uploadYouTubeVideo(url, title);
+            
+            if (!uploadResponse.success || !uploadResponse.gcpUrl) {
+                throw new Error('Failed to upload video to GCP');
+            }
+
+            setProcessingRows(prev => ({ ...prev, [rowId]: 'processing' }));
+            updateRowData(rowId, { status: 'Processing...' });
+
+            // Step 2: Process the video from GCP URL
+            const processResponse = await processVideoUrl(
+                uploadResponse.gcpUrl,
+                5, // frame interval
+                title || uploadResponse.title
+            );
+
+            // Update row with processed data
+            updateRowData(rowId, {
+                status: processResponse.status === 'completed' ? 'Completed' : processResponse.status,
+                title: processResponse.title || title || '',
+                duration: processResponse.duration,
+                keyTopics: processResponse.keyTopics || '',
+            });
+
+            setProcessingRows(prev => ({ ...prev, [rowId]: 'completed' }));
+        } catch (error) {
+            console.error('Error uploading/processing video:', error);
+            updateRowData(rowId, { 
+                status: 'Error',
+                keyTopics: error instanceof Error ? error.message : 'Failed to process video'
+            });
+            setProcessingRows(prev => ({ ...prev, [rowId]: 'error' }));
+        }
+    };
+
     const container: Variants = {
         hidden: { opacity: 0 },
         show: {
@@ -710,6 +791,12 @@ export default function Page() {
                                             </TableHead>
                                             <TableHead 
                                                 className="h-9 py-2 text-[#737373] text-center relative" 
+                                                style={{ width: '10%' }}
+                                            >
+                                                Action
+                                            </TableHead>
+                                            <TableHead 
+                                                className="h-9 py-2 text-[#737373] text-center relative" 
                                                 style={{ width: `${columnWidths.title}%` }}
                                             >
                                                 Title
@@ -775,7 +862,39 @@ export default function Page() {
                                                             onFocus={(e) => e.target.placeholder = ''}
                                                             className="w-full bg-transparent border-none outline-none focus:outline-none text-white font-medium text-center placeholder:text-[#737373]"
                                                             placeholder="Enter video URL"
+                                                            disabled={processingRows[row.id] === 'uploading' || processingRows[row.id] === 'processing'}
                                                         />
+                                                    </div>
+                                                    {/* Row Resize Handle */}
+                                                    <div
+                                                        onMouseDown={(e) => handleMouseDown(e, row.id)}
+                                                        className="absolute bottom-0 left-0 right-0 h-2 cursor-row-resize hover:bg-[#737373]/20 transition-colors z-10"
+                                                        style={{ borderTop: draggedRow === row.id ? '2px solid #737373' : 'none' }}
+                                                    />
+                                                </TableCell>
+                                                <TableCell 
+                                                    className="text-[#a1a1aa] align-middle relative" 
+                                                    style={{ height: `${row.height}px`, width: '10%' }}
+                                                >
+                                                    <div className="h-full flex items-center justify-center px-2">
+                                                        <Button
+                                                            onClick={() => handleUploadAndProcess(row.id, row.videoUrl, row.title)}
+                                                            disabled={!row.videoUrl || processingRows[row.id] === 'uploading' || processingRows[row.id] === 'processing'}
+                                                            className="bg-[#2B2B2B] hover:bg-[#3a3a3a] text-white text-xs px-3 py-1 h-7"
+                                                            size="sm"
+                                                        >
+                                                            {processingRows[row.id] === 'uploading' || processingRows[row.id] === 'processing' ? (
+                                                                <>
+                                                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                                                    {processingRows[row.id] === 'uploading' ? 'Uploading' : 'Processing'}
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Play className="w-3 h-3 mr-1" />
+                                                                    Process
+                                                                </>
+                                                            )}
+                                                        </Button>
                                                     </div>
                                                     {/* Row Resize Handle */}
                                                     <div
@@ -879,15 +998,21 @@ export default function Page() {
                                                 <Tooltip open={showCopiedTooltip}>
                                                     <TooltipTrigger asChild>
                                                         <TableCell 
-                                                            className="h-12 text-[#737373] text-center cursor-pointer" 
+                                                            className="h-12 text-white text-center cursor-pointer font-mono text-xs" 
                                                             style={{ width: '85%' }}
-                                                            onClick={() => {
-                                                                // Copy to clipboard logic here
-                                                                navigator.clipboard.writeText('copied to clipboard');
-                                                                setShowCopiedTooltip(true);
-                                                                setTimeout(() => setShowCopiedTooltip(false), 2000);
+                                                            onClick={async () => {
+                                                                if (apiKey) {
+                                                                    try {
+                                                                        await navigator.clipboard.writeText(apiKey);
+                                                                        setShowCopiedTooltip(true);
+                                                                        setTimeout(() => setShowCopiedTooltip(false), 2000);
+                                                                    } catch (error) {
+                                                                        console.error('Failed to copy API key:', error);
+                                                                    }
+                                                                }
                                                             }}
                                                         >
+                                                            {apiKey || 'Generating...'}
                                                         </TableCell>
                                                     </TooltipTrigger>
                                                     <TooltipContent side="bottom">

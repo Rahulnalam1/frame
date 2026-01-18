@@ -45,11 +45,25 @@ $$ language 'plpgsql';
 CREATE TRIGGER update_videos_updated_at BEFORE UPDATE ON videos
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+-- Create api_keys table
+CREATE TABLE IF NOT EXISTS api_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    api_key TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ
+);
+
+-- Create index for API key lookups
+CREATE INDEX IF NOT EXISTS idx_api_keys_api_key ON api_keys(api_key);
+CREATE INDEX IF NOT EXISTS idx_api_keys_created_at ON api_keys(created_at DESC);
+
 -- Add comments for documentation
 COMMENT ON TABLE videos IS 'Stores video metadata and processing status';
 COMMENT ON TABLE video_summaries IS 'Stores frame-by-frame summaries for each video';
+COMMENT ON TABLE api_keys IS 'Stores API keys for accessing video data';
 COMMENT ON COLUMN videos.video_url IS 'Original URL or file path of the video';
 COMMENT ON COLUMN videos.status IS 'Processing status: processing, completed, or failed';
 COMMENT ON COLUMN videos.frame_interval IS 'Seconds between extracted frames';
 COMMENT ON COLUMN video_summaries.timestamp IS 'Human-readable timestamp (e.g., "0:02", "1:30")';
 COMMENT ON COLUMN video_summaries.timestamp_seconds IS 'Timestamp in seconds for sorting and calculations';
+COMMENT ON COLUMN api_keys.api_key IS 'Unique API key for authentication';

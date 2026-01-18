@@ -94,12 +94,17 @@ def parse_gcp_url(url: str) -> Tuple[str, str]:
     elif "storage.googleapis.com" in url:
         # https://storage.googleapis.com/bucket-name/path/to/file
         # Remove protocol and domain
-        if url.startswith("https://"):
-            path = url[26:]  # Remove "https://storage.googleapis.com/"
-        elif url.startswith("http://"):
-            path = url[25:]  # Remove "http://storage.googleapis.com/"
+        import urllib.parse
+
+        if url.startswith("https://storage.googleapis.com/"):
+            path = url[len("https://storage.googleapis.com/"):]
+        elif url.startswith("http://storage.googleapis.com/"):
+            path = url[len("http://storage.googleapis.com/"):]
         else:
             raise ValueError(f"Invalid GCP URL format: {url}")
+
+        # URL decode the path (handles %20 for spaces, etc.)
+        path = urllib.parse.unquote(path)
 
         parts = path.split("/", 1)
         if len(parts) == 1:

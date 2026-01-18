@@ -4,7 +4,9 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 import httpx
 import modal
 
@@ -16,6 +18,7 @@ from models import (
     VideoSummaryResponse,
     ProcessUrlRequest,
     YouTubeUploadRequest,
+    ApiKeyResponse,
 )
 from supabase_client import (
     create_video,
@@ -26,6 +29,8 @@ from supabase_client import (
     create_video_summaries,
     get_video_summaries,
     aggregate_key_topics,
+    create_api_key,
+    validate_api_key,
 )
 from youtube_uploader import upload_youtube_to_gcp
 from gcp_uploader import upload_file_to_gcp, parse_gcp_url
@@ -55,6 +60,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -74,6 +88,51 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+def verify_api_key(x_api_key: Optional[str] = Header(None)) -> str:
+    """
+    Dependency to verify API key from X-API-Key header.
+
+    Args:
+        x_api_key: API key from X-API-Key header
+
+    Returns:
+        The validated API key
+
+    Raises:
+        HTTPException: If API key is missing or invalid
+    """
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="API key required. Please provide X-API-Key header."
+        )
+
+    if not validate_api_key(x_api_key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired API key."
+        )
+
+    return x_api_key
+
+
+@app.post("/api-keys/generate", response_model=ApiKeyResponse)
+async def generate_api_key():
+    """
+    Generate a new API key for accessing video data.
+
+    Returns:
+        Generated API key with metadata
+    """
+    try:
+        api_key_record = create_api_key()
+        return ApiKeyResponse(**api_key_record)
+    except Exception as e:
+        logger.error(f"Error generating API key: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error generating API key: {str(e)}")
 
 
 def validate_video_file(filename: str) -> bool:
@@ -534,6 +593,65 @@ async def get_video_summaries_endpoint(
         logger.error(f"Error getting video summaries for {video_id}: {e}")
         raise HTTPException(
             status_code=500, detail=f"Error getting video summaries: {str(e)}")
+
+
+# API endpoints with API key authentication
+@app.get("/api/videos", response_model=VideoListResponse)
+async def api_list_all_videos(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(
+        10, ge=1, le=100, description="Maximum number of records to return"),
+    _api_key: str = Depends(verify_api_key),
+):
+    """
+    List all videos with pagination (requires API key).
+
+    - **skip**: Number of records to skip (default: 0)
+    - **limit**: Maximum number of records to return (default: 10, max: 100)
+    - **X-API-Key**: API key in header (required)
+    """
+    try:
+        videos_data, total = list_videos(skip=skip, limit=limit)
+
+        # Convert to response models
+        videos = [VideoResponse(**video) for video in videos_data]
+
+        return VideoListResponse(
+            videos=videos,
+            total=total,
+            skip=skip,
+            limit=limit,
+        )
+    except Exception as e:
+        logger.error(f"Error listing videos: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error listing videos: {str(e)}")
+
+
+@app.get("/api/videos/{video_id}", response_model=VideoResponse)
+async def api_get_video_by_id(
+    video_id: UUID,
+    _api_key: str = Depends(verify_api_key),
+):
+    """
+    Get a single video by ID with all its summaries (requires API key).
+
+    - **video_id**: UUID of the video
+    - **X-API-Key**: API key in header (required)
+    """
+    try:
+        video = get_video_with_summaries(video_id)
+
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        return VideoResponse(**video)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting video {video_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error getting video: {str(e)}")
 
 
 if __name__ == "__main__":
