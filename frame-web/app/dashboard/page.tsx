@@ -5,36 +5,14 @@ import { motion } from "framer-motion";
 import Link from 'next/link';
 import * as React from "react";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
   PieChart,
   Pie,
-  Cell,
-  Legend
 } from 'recharts';
 import {
-  TrendingUp,
-  TrendingDown,
-  AlertCircle,
-  CheckCircle2,
-  Lightbulb,
-  Clock,
-  Hash,
-  Activity
-} from "lucide-react";
+  ChartContainer,
+  ChartTooltip,
+  type ChartConfig,
+} from "@/components/ui/chart";
 
 // Types from gap_analysis.json
 interface ClusterInfo {
@@ -118,24 +96,21 @@ export default function DashboardPage() {
   if (loading || !gapData) {
     return (
       <main className="min-h-screen bg-[#1C1C1C] flex items-center justify-center">
-        <div className="text-white">Loading analysis...</div>
+        <div className="text-[#737373] text-[15px]">loading analysis...</div>
       </main>
     );
   }
 
   // Prepare chart data
-  const clusterDistribution = Object.entries(gapData.analysis.clusters).map(([key, data]) => ({
-    name: `Cluster ${key.split('_')[1]}`,
-    videos: data.video_count,
-    percentage: Math.round(data.percentage * 10) / 10,
-  }));
-
-  const durationData = Object.entries(gapData.analysis.clusters)
-    .filter(([_, data]) => data.avg_duration > 0)
-    .map(([key, data]) => ({
-      name: `C${key.split('_')[1]}`,
-      duration: Math.round(data.avg_duration * 10) / 10,
-    }));
+  const clusterDistribution = Object.entries(gapData.analysis.clusters).map(([key, data], index) => {
+    const clusterId = key.split('_')[1];
+    return {
+      cluster: `cluster ${clusterId}`,
+      videos: data.video_count,
+      percentage: Math.round(data.percentage * 10) / 10,
+      fill: COLORS[index % COLORS.length],
+    };
+  });
 
   // Calculate metrics
   const totalVideos = gapData.analysis.total_videos;
@@ -147,6 +122,13 @@ export default function DashboardPage() {
   const contentGaps = gapData.gaps.underrepresented_patterns.length;
   const overProduced = gapData.gaps.overrepresented_patterns.length;
 
+  // Chart configuration for pie chart
+  const clusterChartConfig = {
+    videos: {
+      label: "videos",
+    },
+  } satisfies ChartConfig;
+
   return (
     <main className="min-h-screen bg-[#1C1C1C] flex flex-col overflow-auto">
       {/* Navigation */}
@@ -156,7 +138,7 @@ export default function DashboardPage() {
         transition={{ duration: 0.8, ease: "easeOut", delay: 0.1 }}
         className="static w-full px-4 py-20"
       >
-        <div className="max-w-[1200px] mx-auto flex justify-center gap-2">
+        <div className="max-w-[660px] mx-auto flex justify-center gap-2">
           <Link href="/">
             <Button variant="ghost" className="text-[#737373] hover:text-white hover:bg-[#2B2B2B]">
               frame
@@ -185,394 +167,157 @@ export default function DashboardPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: "easeOut", delay: 0.3 }}
-        className="grow flex justify-center px-4 pt-2 pb-20"
+        className="flex-grow flex justify-center px-4 pt-2 pb-20"
       >
-        <div className="max-w-[1200px] w-full space-y-6">
+        <div className="max-w-[660px] w-full space-y-12">
           {/* Header */}
           <div>
             <h1 className="text-[15px] font-normal text-white mb-1">
-              Content Gap Analysis
+              content gap analysis
             </h1>
             <p className="text-[#737373] text-[15px]">
-              AI-powered insights into your content patterns • Model: {gapData.model_id.slice(0, 8)}...
+              {totalVideos} videos analyzed across {gapData.analysis.num_clusters} content patterns. avg {avgDuration > 1 ? avgDuration.toFixed(1) : '<1'} min per video.
             </p>
           </div>
 
-          {/* Key Metrics */}
-          <div className="grid gap-4 md:grid-cols-4">
-            <Card className="bg-[#252525] border-[#3a3a3a]">
-              <CardHeader className="pb-3">
-                <CardDescription className="text-[#737373] text-[13px] flex items-center gap-2">
-                  <Hash className="h-4 w-4" />
-                  Total Videos
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-normal text-white">
-                  {totalVideos}
-                </div>
-                <p className="text-xs text-[#737373] mt-1">
-                  {gapData.analysis.num_clusters} content patterns
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-[#252525] border-[#3a3a3a]">
-              <CardHeader className="pb-3">
-                <CardDescription className="text-[#737373] text-[13px] flex items-center gap-2">
-                  <Clock className="h-4 w-4" />
-                  Avg Duration
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-normal text-white">
-                  {avgDuration > 1 ? avgDuration.toFixed(1) : '<1'}
-                </div>
-                <p className="text-xs text-[#737373] mt-1">
-                  minutes per video
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-[#252525] border-[#3a3a3a]">
-              <CardHeader className="pb-3">
-                <CardDescription className="text-[#ef4444] text-[13px] flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4" />
-                  Content Gaps
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-normal text-[#ef4444]">
-                  {contentGaps}
-                </div>
-                <p className="text-xs text-[#737373] mt-1">
-                  underrepresented patterns
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-[#252525] border-[#3a3a3a]">
-              <CardHeader className="pb-3">
-                <CardDescription className="text-[#f59e0b] text-[13px] flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4" />
-                  Over-Produced
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-normal text-[#f59e0b]">
-                  {overProduced}
-                </div>
-                <p className="text-xs text-[#737373] mt-1">
-                  consider diversifying
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Content Distribution */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card className="bg-[#252525] border-[#3a3a3a]">
-              <CardHeader>
-                <CardTitle className="text-[15px] font-normal text-white">
-                  Cluster Distribution
-                </CardTitle>
-                <CardDescription className="text-[#737373] text-[13px]">
-                  How your content is distributed across patterns
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
+          {/* Distribution Overview */}
+          <div>
+            <h2 className="text-[15px] font-normal text-white mb-2">
+              distribution
+            </h2>
+            <div className="overflow-hidden rounded-lg border border-[#2B2B2B] bg-[#1C1C1C]">
+              <div className="p-6">
+                <ChartContainer
+                  config={clusterChartConfig}
+                  className="mx-auto aspect-square max-h-[200px]"
+                >
                   <PieChart>
-                    <Pie
-                      data={clusterDistribution}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={(entry: any) => `${entry.name}: ${entry.percentage}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="videos"
-                    >
-                      {clusterDistribution.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#252525',
-                        border: '1px solid #3a3a3a',
-                        color: '#fff'
+                    <ChartTooltip
+                      cursor={false}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="rounded-lg border border-[#2B2B2B] bg-[#1C1C1C] px-3 py-2">
+                              <div className="text-[13px] text-white">
+                                {data.cluster}: {data.videos} videos
+                              </div>
+                              <div className="text-[11px] text-[#737373]">
+                                {data.percentage}%
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
                       }}
+                    />
+                    <Pie 
+                      data={clusterDistribution} 
+                      dataKey="videos" 
+                      nameKey="cluster"
+                      strokeWidth={0}
                     />
                   </PieChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-[#252525] border-[#3a3a3a]">
-              <CardHeader>
-                <CardTitle className="text-[15px] font-normal text-white">
-                  Average Duration by Cluster
-                </CardTitle>
-                <CardDescription className="text-[#737373] text-[13px]">
-                  Typical video length per content pattern
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={durationData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#3a3a3a" />
-                    <XAxis
-                      dataKey="name"
-                      stroke="#737373"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <YAxis
-                      stroke="#737373"
-                      style={{ fontSize: '12px' }}
-                      label={{ value: 'Minutes', angle: -90, position: 'insideLeft', fill: '#737373' }}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#252525',
-                        border: '1px solid #3a3a3a',
-                        color: '#fff'
-                      }}
-                    />
-                    <Bar dataKey="duration" fill="#8b5cf6" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+                </ChartContainer>
+              </div>
+            </div>
           </div>
 
-          {/* Content Gaps - High Priority */}
+          {/* Content Gaps */}
           {gapData.gaps.underrepresented_patterns.length > 0 && (
-            <Card className="bg-[#252525] border-[#ef4444]">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5 text-[#ef4444]" />
-                  <CardTitle className="text-[15px] font-normal text-white">
-                    Content Gaps - High Priority
-                  </CardTitle>
-                </div>
-                <CardDescription className="text-[#737373] text-[13px]">
-                  These content patterns are underrepresented in your library
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <div>
+              <h2 className="text-[15px] font-normal text-[#ef4444] mb-2">
+                content gaps ({contentGaps})
+              </h2>
+              <div className="space-y-4 text-[15px] leading-relaxed">
                 {gapData.gaps.underrepresented_patterns.map((gap, idx) => (
-                  <div key={idx} className="p-4 bg-[#1C1C1C] rounded-lg border border-[#3a3a3a]">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <Badge variant="destructive" className="mb-2">
-                          Cluster {gap.cluster_id}
-                        </Badge>
-                        <div className="flex items-center gap-2 text-[#737373] text-sm">
-                          <span>{gap.current_count} videos</span>
-                          <span>•</span>
-                          <span>{gap.percentage.toFixed(1)}%</span>
-                          <TrendingDown className="h-4 w-4 text-[#ef4444] ml-2" />
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm text-[#737373]">Avg Duration</div>
-                        <div className="text-lg text-white">
-                          {gap.pattern.duration > 1
-                            ? `${gap.pattern.duration.toFixed(1)} min`
-                            : '<1 min'}
-                        </div>
-                      </div>
+                  <div key={idx}>
+                    <p className="text-white mb-1">
+                      <span className="text-[#737373]">cluster {gap.cluster_id}:</span> {gap.ai_description}
+                    </p>
+                    <div className="text-[#737373] text-[13px]">
+                      {gap.current_count} videos • {gap.percentage.toFixed(1)}% • avg {gap.pattern.duration > 1 ? `${gap.pattern.duration.toFixed(1)} min` : '<1 min'}
                     </div>
-
-                    <div className="mb-3">
-                      <div className="text-sm text-[#737373] mb-1">AI Pattern Analysis:</div>
-                      <p className="text-white text-sm leading-relaxed">
-                        {gap.ai_description}
-                      </p>
-                    </div>
-
-                    {gap.pattern.topics.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {gap.pattern.topics.slice(0, 5).map((topic, i) => (
-                          <Badge key={i} variant="outline" className="text-xs bg-[#2B2B2B] border-[#3a3a3a] text-white">
-                            {topic.length > 30 ? topic.slice(0, 30) + '...' : topic}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
 
           {/* Over-Represented Content */}
           {gapData.gaps.overrepresented_patterns.length > 0 && (
-            <Card className="bg-[#252525] border-[#f59e0b]">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-[#f59e0b]" />
-                  <CardTitle className="text-[15px] font-normal text-white">
-                    Over-Represented Content
-                  </CardTitle>
-                </div>
-                <CardDescription className="text-[#737373] text-[13px]">
-                  Consider diversifying away from these patterns
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <div>
+              <h2 className="text-[15px] font-normal text-[#f59e0b] mb-2">
+                over-represented ({overProduced})
+              </h2>
+              <div className="space-y-4 text-[15px] leading-relaxed">
                 {gapData.gaps.overrepresented_patterns.map((pattern, idx) => (
-                  <div key={idx} className="p-4 bg-[#1C1C1C] rounded-lg border border-[#3a3a3a]">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <Badge className="mb-2 bg-[#f59e0b] text-white">
-                          Cluster {pattern.cluster_id}
-                        </Badge>
-                        <div className="flex items-center gap-2 text-[#737373] text-sm">
-                          <span>{pattern.current_count} videos</span>
-                          <span>•</span>
-                          <span>{pattern.percentage.toFixed(1)}%</span>
-                          <TrendingUp className="h-4 w-4 text-[#f59e0b] ml-2" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mb-3">
-                      <div className="text-sm text-[#737373] mb-1">Pattern:</div>
-                      <p className="text-white text-sm leading-relaxed">
-                        {pattern.ai_description.slice(0, 200)}
-                        {pattern.ai_description.length > 200 && '...'}
-                      </p>
+                  <div key={idx}>
+                    <p className="text-white mb-1">
+                      <span className="text-[#737373]">cluster {pattern.cluster_id}:</span> {pattern.ai_description.slice(0, 200)}{pattern.ai_description.length > 200 && '...'}
+                    </p>
+                    <div className="text-[#737373] text-[13px]">
+                      {pattern.current_count} videos • {pattern.percentage.toFixed(1)}%
                     </div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
 
-          {/* AI Recommendations */}
+          {/* Recommendations */}
           {gapData.gaps.recommendations && gapData.gaps.recommendations.length > 0 && (
-            <Card className="bg-[#252525] border-[#10b981]">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Lightbulb className="h-5 w-5 text-[#10b981]" />
-                  <CardTitle className="text-[15px] font-normal text-white">
-                    Action Plan - Prioritized Recommendations
-                  </CardTitle>
-                </div>
-                <CardDescription className="text-[#737373] text-[13px]">
-                  AI-generated suggestions to balance your content portfolio
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
+            <div>
+              <h2 className="text-[15px] font-normal text-white mb-2">
+                recommendations
+              </h2>
+              <div className="space-y-3 text-[15px] leading-relaxed">
                 {gapData.gaps.recommendations
                   .sort((a, b) => b.current_gap - a.current_gap)
                   .map((rec, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-start gap-3 p-3 bg-[#1C1C1C] rounded-lg border border-[#3a3a3a]"
-                    >
-                      <div className="shrink-0 w-8 h-8 rounded-full bg-[#10b981] flex items-center justify-center text-white font-medium text-sm">
-                        {idx + 1}
-                      </div>
-                      <div className="grow">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge variant="outline" className="text-xs bg-[#2B2B2B] border-[#3a3a3a] text-white">
-                            {rec.priority}
-                          </Badge>
-                          <span className="text-xs text-[#737373]">
-                            Gap: {rec.current_gap.toFixed(1)}% below average
-                          </span>
-                        </div>
-                        <p className="text-white text-sm">
-                          {rec.action}
-                        </p>
-                      </div>
-                    </div>
+                    <p key={idx} className="text-white">
+                      <span className="text-[#737373]">{idx + 1}.</span> {rec.action}
+                    </p>
                   ))}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
 
-          {/* All Clusters Overview */}
-          <Card className="bg-[#252525] border-[#3a3a3a]">
-            <CardHeader>
-              <CardTitle className="text-[15px] font-normal text-white">
-                All Content Clusters
-              </CardTitle>
-              <CardDescription className="text-[#737373] text-[13px]">
-                Detailed breakdown of each content pattern
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          {/* All Clusters */}
+          <div>
+            <h2 className="text-[15px] font-normal text-white mb-4">
+              all clusters
+            </h2>
+            <div className="space-y-6">
               {Object.entries(gapData.analysis.clusters).map(([key, cluster]) => {
                 const clusterId = parseInt(key.split('_')[1]);
                 const isGap = gapData.gaps.underrepresented_patterns.some(g => g.cluster_id === clusterId);
                 const isOver = gapData.gaps.overrepresented_patterns.some(g => g.cluster_id === clusterId);
+                
+                const statusColor = isGap ? '#ef4444' : isOver ? '#f59e0b' : '#10b981';
+                const statusText = isGap ? 'gap' : isOver ? 'over-rep' : 'balanced';
 
                 return (
-                  <div key={key} className="p-4 bg-[#1C1C1C] rounded-lg border border-[#3a3a3a]">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-white font-medium">Cluster {clusterId}</h3>
-                        {isGap && (
-                          <Badge variant="destructive" className="text-xs">Gap</Badge>
-                        )}
-                        {isOver && (
-                          <Badge className="text-xs bg-[#f59e0b] text-white">Over-Rep</Badge>
-                        )}
-                        {!isGap && !isOver && (
-                          <Badge variant="outline" className="text-xs bg-[#10b981] text-white border-[#10b981]">
-                            Balanced
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm text-[#737373]">{cluster.video_count} videos</div>
-                        <div className="text-lg text-white">{cluster.percentage.toFixed(1)}%</div>
+                  <div key={key}>
+                    <div className="flex items-baseline justify-between mb-2">
+                      <h3 className="text-[15px] font-normal text-white">
+                        cluster {clusterId} <span className="text-[#737373]" style={{ color: statusColor }}>({statusText})</span>
+                      </h3>
+                      <div className="text-[13px] text-[#737373]">
+                        {cluster.video_count} videos • {cluster.percentage.toFixed(1)}%
                       </div>
                     </div>
-
-                    <div className="mb-3">
-                      <p className="text-sm text-white leading-relaxed">
-                        {cluster.ai_description}
-                      </p>
+                    <p className="text-[15px] text-white leading-relaxed mb-2">
+                      {cluster.ai_description}
+                    </p>
+                    <div className="text-[13px] text-[#737373]">
+                      {cluster.avg_duration > 1 ? `${cluster.avg_duration.toFixed(1)} min` : '<1 min'} avg • {cluster.avg_scene_change_rate.toFixed(1)} scene changes/min • {cluster.avg_topics.toFixed(0)} topics
                     </div>
-
-                    <div className="grid grid-cols-3 gap-4 mb-3 text-sm">
-                      <div>
-                        <div className="text-[#737373]">Avg Duration</div>
-                        <div className="text-white">
-                          {cluster.avg_duration > 1
-                            ? `${cluster.avg_duration.toFixed(1)} min`
-                            : '<1 min'}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[#737373]">Scene Changes/min</div>
-                        <div className="text-white">{cluster.avg_scene_change_rate.toFixed(1)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[#737373]">Avg Topics</div>
-                        <div className="text-white">{cluster.avg_topics.toFixed(0)}</div>
-                      </div>
-                    </div>
-
-                    {cluster.top_topics.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {cluster.top_topics.slice(0, 5).map((topic, i) => (
-                          <Badge key={i} variant="outline" className="text-xs bg-[#2B2B2B] border-[#3a3a3a] text-white">
-                            {topic.length > 30 ? topic.slice(0, 30) + '...' : topic}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       </motion.div>
     </main>

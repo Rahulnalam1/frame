@@ -2,30 +2,8 @@
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
 
 export default function WaitlistPage() {
-    const [isJoined, setIsJoined] = useState(false);
-    const [totalPeople, setTotalPeople] = useState(0);
-
-    // Load count from localStorage on mount
-    useEffect(() => {
-        const savedCount = localStorage.getItem('waitlistCount');
-        if (savedCount) {
-            setTotalPeople(parseInt(savedCount));
-        }
-    }, []);
-
-    const handleJoinWaitlist = () => {
-        if (!isJoined) {
-            const newCount = totalPeople + 1;
-            setTotalPeople(newCount);
-            setIsJoined(true);
-            
-            // Save to localStorage
-            localStorage.setItem('waitlistCount', newCount.toString());
-        }
-    };
 
     return (
         <main className="min-h-screen bg-[#1C1C1C] flex flex-col overflow-auto">
@@ -91,17 +69,12 @@ export default function WaitlistPage() {
                     {/* Header outside the card */}
                     <div>
                         <h1 className="text-[15px] font-normal text-white mb-1">
-                            {!isJoined ? (
-                                <Button 
-                                    variant="link" 
-                                    onClick={handleJoinWaitlist}
-                                    className="text-white hover:text-[#a1a1aa] text-[15px] p-0 h-auto font-normal"
-                                >
-                                    join the waitlist
-                                </Button>
-                            ) : (
-                                <span>you and {totalPeople} other {totalPeople === 1 ? 'person has' : 'people have'} joined the waitlist</span>
-                            )}
+                            <Button 
+                                variant="link" 
+                                className="text-white hover:text-[#a1a1aa] text-[15px] p-0 h-auto font-normal"
+                            >
+                                you and 64 other people have joined the waitlist
+                            </Button>
                         </h1>
                         <p className="text-[#737373] text-[15px]">
                             get early access to frame. we&apos;ll notify you when we launch.
