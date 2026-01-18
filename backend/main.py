@@ -1,16 +1,15 @@
 """FastAPI application for video processing."""
-import os
 import logging
 import tempfile
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
-from fastapi.responses import JSONResponse
 import httpx
 import modal
 
 from config import settings
+from video_utils import format_timestamp, get_video_duration
 from models import (
     VideoResponse,
     VideoListResponse,
@@ -18,7 +17,6 @@ from models import (
     ProcessUrlRequest,
     YouTubeUploadRequest,
 )
-from video_processor import format_timestamp
 from supabase_client import (
     create_video,
     get_video,
@@ -30,7 +28,7 @@ from supabase_client import (
     aggregate_key_topics,
 )
 from youtube_uploader import upload_youtube_to_gcp
-from gcp_downloader import download_from_gcp
+from gcp_uploader import upload_file_to_gcp, parse_gcp_url
 
 # Configure logging
 logging.basicConfig(
@@ -40,7 +38,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-modal_app = modal.Func.lookup("video-frame-processor", "process_video_on_gpu")
+# Lookup Modal function - handle case where Modal is not available (for local dev)
+modal_app = None
+try:
+    modal_app = modal.Function.from_name(
+        "video-frame-processor", "process_video_on_gpu")
+    logger.info("Modal function loaded successfully")
+except (AttributeError, Exception) as e:
+    logger.warning(
+        "Modal not available or function not found: %s. Video processing will fail.", e)
 
 # Create FastAPI app
 app = FastAPI(
@@ -185,9 +191,23 @@ async def upload_video(
         video_id = video_record["id"]
 
         try:
-            # Process video
-            summaries = process_video_on_gpu.remote(
-                str(video_path), interval=frame_interval)
+            # Upload video to GCP first (Modal function requires GCP path)
+            logger.info("Uploading video to GCP for processing...")
+            gcp_bucket_name, gcp_blob_path = upload_file_to_gcp(video_path)
+
+            # Process video using Modal
+            if modal_app is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Modal function not available. Please deploy the video processor first."
+                )
+
+            logger.info("Calling Modal function to process video...")
+            summaries = modal_app.remote(
+                gcp_bucket_name=gcp_bucket_name,
+                gcp_blob_path=gcp_blob_path,
+                interval=frame_interval
+            )
 
             # Create summary records
             summary_records = []
@@ -299,17 +319,18 @@ async def process_video_url(request: ProcessUrlRequest):
     title = request.title
 
     # Check if URL is a GCP URL
-    is_gcp_url = url.startswith("gs://") or "storage.googleapis.com" in url
+    is_gcp_url = (
+        url.startswith("gs://") or
+        "storage.googleapis.com" in url or
+        "storage.cloud.google.com" in url
+    )
 
     video_path = None
+    duration_formatted = "0:00"  # Placeholder, will be updated after processing
 
     try:
-        if is_gcp_url:
-            # Download from GCP
-            logger.info("Downloading video from GCP: %s", url)
-            video_path = download_from_gcp(url)
-        else:
-            # Download from regular URL
+        if not is_gcp_url:
+            # Download from regular URL and upload to GCP
             file_ext = ".mp4"  # Default extension
             temp_file = tempfile.NamedTemporaryFile(
                 delete=False,
@@ -320,9 +341,9 @@ async def process_video_url(request: ProcessUrlRequest):
             video_path = Path(temp_file.name)
             await download_video_from_url(url, video_path)
 
-        # Get video duration
-        duration_seconds = get_video_duration(str(video_path))
-        duration_formatted = format_timestamp(duration_seconds)
+            # Get video duration for non-GCP URLs
+            duration_seconds = get_video_duration(str(video_path))
+            duration_formatted = format_timestamp(duration_seconds)
 
         # Create video record with "processing" status
         video_data = {
@@ -338,9 +359,29 @@ async def process_video_url(request: ProcessUrlRequest):
         video_id = video_record["id"]
 
         try:
-            # Process video
+            # If video is already in GCP, extract bucket and blob path
+            if is_gcp_url:
+                # Parse GCP URL to get bucket and blob path
+                logger.info("Parsing GCP URL: %s", url)
+                gcp_bucket_name, gcp_blob_path = parse_gcp_url(url)
+            else:
+                # Upload video to GCP first (Modal function requires GCP path)
+                logger.info("Uploading video to GCP for processing...")
+                gcp_bucket_name, gcp_blob_path = upload_file_to_gcp(video_path)
+
+            # Process video using Modal
+            if modal_app is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Modal function not available. Please deploy the video processor first."
+                )
+
+            logger.info("Calling Modal function to process video...")
             summaries = modal_app.remote(
-                settings.GCP_BUCKET_NAME, str(video_path), interval=frame_interval)
+                gcp_bucket_name=gcp_bucket_name,
+                gcp_blob_path=gcp_blob_path,
+                interval=frame_interval
+            )
 
             # Create summary records
             summary_records = []

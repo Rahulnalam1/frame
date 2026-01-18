@@ -23,7 +23,7 @@ image = (
 
 @app.function(
     image=image,
-    gpu="T4",
+    gpu="A10G",
     timeout=3600,
     secrets=[modal.Secret.from_name("gcp-secret")],
     memory=16384,
