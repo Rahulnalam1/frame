@@ -245,3 +245,117 @@ def aggregate_key_topics(summaries: List[Dict[str, Any]]) -> str:
         combined = combined[:500] + "..."
 
     return combined
+
+
+def create_api_key() -> Dict[str, Any]:
+    """
+    Create a new API key in the database.
+
+    Returns:
+        Created API key record with the generated key
+    """
+    import secrets
+
+    client = get_supabase_client()
+
+    try:
+        # Generate a secure random API key
+        api_key = f"frame_{secrets.token_urlsafe(32)}"
+
+        api_key_data = {
+            "api_key": api_key
+        }
+
+        response = client.table("api_keys").insert(api_key_data).execute()
+        if response.data:
+            logger.info("Created API key: %s", response.data[0].get('id'))
+            return response.data[0]
+        else:
+            raise ValueError("No data returned from insert")
+    except Exception as e:
+        logger.error(f"Error creating API key: {e}")
+        raise
+
+
+def validate_api_key(api_key: str) -> bool:
+    """
+    Validate an API key exists and is not expired.
+
+    Args:
+        api_key: The API key to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    client = get_supabase_client()
+
+    try:
+        from datetime import datetime, timezone
+
+        response = (
+            client.table("api_keys")
+            .select("*")
+            .eq("api_key", api_key)
+            .execute()
+        )
+
+        if not response.data or len(response.data) == 0:
+            return False
+
+        key_record = response.data[0]
+
+        # Check if expired
+        if key_record.get("expires_at"):
+            expires_at_str = key_record["expires_at"]
+            try:
+                # Handle ISO format with or without timezone
+                if expires_at_str.endswith("Z"):
+                    expires_at = datetime.fromisoformat(
+                        expires_at_str.replace("Z", "+00:00"))
+                else:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+
+                # Get current time in same timezone as expires_at
+                if expires_at.tzinfo:
+                    now = datetime.now(timezone.utc)
+                else:
+                    now = datetime.now()
+
+                if now > expires_at:
+                    return False
+            except (ValueError, AttributeError) as e:
+                logger.warning(f"Error parsing expires_at for API key: {e}")
+                # If we can't parse the date, assume it's valid (don't block access)
+
+        return True
+    except Exception as e:
+        logger.error(f"Error validating API key: {e}")
+        return False
+
+
+def get_api_key_by_key(api_key: str) -> Optional[Dict[str, Any]]:
+    """
+    Get an API key record by the API key string.
+
+    Args:
+        api_key: The API key string
+
+    Returns:
+        API key record or None if not found
+    """
+    client = get_supabase_client()
+
+    try:
+        response = (
+            client.table("api_keys")
+            .select("*")
+            .eq("api_key", api_key)
+            .execute()
+        )
+
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+    except Exception as e:
+        logger.error(f"Error getting API key: {e}")
+        return None

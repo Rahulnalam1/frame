@@ -1,23 +1,25 @@
 """FastAPI application for video processing."""
-import os
 import logging
 import tempfile
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 import httpx
+import modal
 
 from config import settings
+from video_utils import format_timestamp, get_video_duration
 from models import (
     VideoResponse,
     VideoListResponse,
     VideoSummaryResponse,
     ProcessUrlRequest,
     YouTubeUploadRequest,
+    ApiKeyResponse,
 )
-from video_processor import process_video, get_video_duration, format_timestamp
 from supabase_client import (
     create_video,
     get_video,
@@ -27,9 +29,11 @@ from supabase_client import (
     create_video_summaries,
     get_video_summaries,
     aggregate_key_topics,
+    create_api_key,
+    validate_api_key,
 )
 from youtube_uploader import upload_youtube_to_gcp
-from gcp_downloader import download_from_gcp
+from gcp_uploader import upload_file_to_gcp, parse_gcp_url
 
 # Configure logging
 logging.basicConfig(
@@ -38,11 +42,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# Lookup Modal function - handle case where Modal is not available (for local dev)
+modal_app = None
+try:
+    modal_app = modal.Function.from_name(
+        "video-frame-processor", "process_video_on_gpu")
+    logger.info("Modal function loaded successfully")
+except (AttributeError, Exception) as e:
+    logger.warning(
+        "Modal not available or function not found: %s. Video processing will fail.", e)
+
 # Create FastAPI app
 app = FastAPI(
     title="Frame Video Processing API",
     description="API for processing videos and extracting frame summaries",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -66,6 +90,51 @@ async def health():
     return {"status": "healthy"}
 
 
+def verify_api_key(x_api_key: Optional[str] = Header(None)) -> str:
+    """
+    Dependency to verify API key from X-API-Key header.
+
+    Args:
+        x_api_key: API key from X-API-Key header
+
+    Returns:
+        The validated API key
+
+    Raises:
+        HTTPException: If API key is missing or invalid
+    """
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="API key required. Please provide X-API-Key header."
+        )
+
+    if not validate_api_key(x_api_key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired API key."
+        )
+
+    return x_api_key
+
+
+@app.post("/api-keys/generate", response_model=ApiKeyResponse)
+async def generate_api_key():
+    """
+    Generate a new API key for accessing video data.
+
+    Returns:
+        Generated API key with metadata
+    """
+    try:
+        api_key_record = create_api_key()
+        return ApiKeyResponse(**api_key_record)
+    except Exception as e:
+        logger.error(f"Error generating API key: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error generating API key: {str(e)}")
+
+
 def validate_video_file(filename: str) -> bool:
     """Validate that the uploaded file is a supported video format."""
     ext = Path(filename).suffix.lower()
@@ -75,7 +144,7 @@ def validate_video_file(filename: str) -> bool:
 async def download_video_from_url(url: str, output_path: Path) -> Path:
     """Download a video from a URL."""
     logger.info("Downloading video from URL: %s", url)
-    
+
     # Configure headers to mimic a browser request
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -84,7 +153,7 @@ async def download_video_from_url(url: str, output_path: Path) -> Path:
         "Referer": "https://www.youtube.com/",
         "Accept-Encoding": "identity",  # Don't compress, we want raw video data
     }
-    
+
     async with httpx.AsyncClient(
         timeout=300.0,
         follow_redirects=True,  # Explicitly enable redirect following
@@ -98,7 +167,7 @@ async def download_video_from_url(url: str, output_path: Path) -> Path:
                         status_code=400,
                         detail=f"Failed to download video from URL: HTTP {response.status_code}"
                     )
-                
+
                 with open(output_path, "wb") as f:
                     async for chunk in response.aiter_bytes():
                         f.write(chunk)
@@ -114,7 +183,7 @@ async def download_video_from_url(url: str, output_path: Path) -> Path:
                 status_code=400,
                 detail=f"Failed to download video from URL: {str(e)}"
             )
-    
+
     logger.info("Successfully downloaded video to: %s", output_path)
     return output_path
 
@@ -122,12 +191,14 @@ async def download_video_from_url(url: str, output_path: Path) -> Path:
 @app.post("/videos/upload", response_model=VideoResponse)
 async def upload_video(
     file: UploadFile = File(...),
-    frame_interval: int = Query(2, ge=1, le=60, description="Seconds between frames"),
-    title: Optional[str] = Query(None, description="Optional title for the video"),
+    frame_interval: int = Query(
+        2, ge=1, le=60, description="Seconds between frames"),
+    title: Optional[str] = Query(
+        None, description="Optional title for the video"),
 ):
     """
     Upload and process a video file.
-    
+
     - **file**: Video file to upload (mp4, avi, mov, etc.)
     - **frame_interval**: Seconds between frames to extract (default: 2)
     - **title**: Optional title for the video
@@ -138,7 +209,7 @@ async def upload_video(
             status_code=400,
             detail=f"Unsupported video format. Allowed: {', '.join(settings.ALLOWED_VIDEO_EXTENSIONS)}"
         )
-    
+
     # Save uploaded file
     file_ext = Path(file.filename).suffix
     temp_file = tempfile.NamedTemporaryFile(
@@ -146,7 +217,7 @@ async def upload_video(
         suffix=file_ext,
         dir=settings.UPLOAD_DIR
     )
-    
+
     try:
         # Read and save file
         content = await file.read()
@@ -155,16 +226,16 @@ async def upload_video(
                 status_code=400,
                 detail=f"File too large. Maximum size: {settings.MAX_VIDEO_SIZE}MB"
             )
-        
+
         temp_file.write(content)
         temp_file.close()
-        
+
         video_path = Path(temp_file.name)
-        
+
         # Get video duration
         duration_seconds = get_video_duration(str(video_path))
         duration_formatted = format_timestamp(duration_seconds)
-        
+
         # Create video record with "processing" status
         video_data = {
             "video_url": file.filename or "uploaded_video",
@@ -174,14 +245,29 @@ async def upload_video(
             "frame_interval": frame_interval,
             "total_frames": 0,
         }
-        
+
         video_record = create_video(video_data)
         video_id = video_record["id"]
-        
+
         try:
-            # Process video
-            summaries = process_video(str(video_path), interval=frame_interval)
-            
+            # Upload video to GCP first (Modal function requires GCP path)
+            logger.info("Uploading video to GCP for processing...")
+            gcp_bucket_name, gcp_blob_path = upload_file_to_gcp(video_path)
+
+            # Process video using Modal
+            if modal_app is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Modal function not available. Please deploy the video processor first."
+                )
+
+            logger.info("Calling Modal function to process video...")
+            summaries = modal_app.remote(
+                gcp_bucket_name=gcp_bucket_name,
+                gcp_blob_path=gcp_blob_path,
+                interval=frame_interval
+            )
+
             # Create summary records
             summary_records = []
             for summary in summaries:
@@ -192,13 +278,13 @@ async def upload_video(
                     "description": summary["description"],
                     "frame_number": summary["frame_number"],
                 })
-            
+
             if summary_records:
                 create_video_summaries(summary_records)
-            
+
             # Aggregate key topics
             key_topics = aggregate_key_topics(summaries)
-            
+
             # Update video record with completed status
             update_video(
                 video_id,
@@ -208,22 +294,24 @@ async def upload_video(
                     "key_topics": key_topics,
                 }
             )
-            
+
             # Get updated video with summaries
             video = get_video_with_summaries(UUID(video_id))
-            
+
             if not video:
-                raise HTTPException(status_code=404, detail="Video not found after processing")
-            
+                raise HTTPException(
+                    status_code=404, detail="Video not found after processing")
+
             # Convert to response model (handles camelCase conversion)
             return VideoResponse(**video)
-            
+
         except Exception as e:
             logger.error("Error processing video: %s", e)
             # Update status to failed
             update_video(video_id, {"status": "failed"})
-            raise HTTPException(status_code=500, detail=f"Error processing video: {str(e)}")
-        
+            raise HTTPException(
+                status_code=500, detail=f"Error processing video: {str(e)}")
+
         finally:
             # Clean up temporary file
             try:
@@ -231,24 +319,25 @@ async def upload_video(
                     video_path.unlink()
             except Exception as e:
                 logger.warning("Error deleting temporary file: %s", e)
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Error uploading video: %s", e)
-        raise HTTPException(status_code=500, detail=f"Error uploading video: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error uploading video: {str(e)}")
 
 
 @app.post("/videos/youtube-upload")
 async def upload_youtube_video(request: YouTubeUploadRequest):
     """
     Upload a YouTube video to Google Cloud Storage using Apify.
-    
+
     - **url**: YouTube video URL
     - **preferredQuality**: Video quality preference (default: "480p")
     - **preferredFormat**: Video format preference (default: "mp4")
     - **title**: Optional title for the video
-    
+
     Returns the GCP URL of the uploaded video.
     """
     try:
@@ -258,7 +347,7 @@ async def upload_youtube_video(request: YouTubeUploadRequest):
             preferred_format=request.preferredFormat or "mp4",
             title=request.title
         )
-        
+
         return {
             "success": True,
             "gcpUrl": result.get("downloadedFileUrl"),
@@ -271,14 +360,15 @@ async def upload_youtube_video(request: YouTubeUploadRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Error uploading YouTube video: %s", e)
-        raise HTTPException(status_code=500, detail=f"Error uploading YouTube video: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error uploading YouTube video: {str(e)}")
 
 
 @app.post("/videos/process-url", response_model=VideoResponse)
 async def process_video_url(request: ProcessUrlRequest):
     """
     Process a video from a URL.
-    
+
     - **url**: URL of the video to process
     - **frame_interval**: Seconds between frames (default: 2)
     - **title**: Optional title for the video
@@ -286,19 +376,20 @@ async def process_video_url(request: ProcessUrlRequest):
     url = request.url
     frame_interval = request.frameInterval or settings.DEFAULT_FRAME_INTERVAL
     title = request.title
-    
+
     # Check if URL is a GCP URL
-    is_gcp_url = url.startswith("gs://") or "storage.googleapis.com" in url
-    
+    is_gcp_url = (
+        url.startswith("gs://") or
+        "storage.googleapis.com" in url or
+        "storage.cloud.google.com" in url
+    )
+
     video_path = None
-    
+    duration_formatted = "0:00"  # Placeholder, will be updated after processing
+
     try:
-        if is_gcp_url:
-            # Download from GCP
-            logger.info("Downloading video from GCP: %s", url)
-            video_path = download_from_gcp(url)
-        else:
-            # Download from regular URL
+        if not is_gcp_url:
+            # Download from regular URL and upload to GCP
             file_ext = ".mp4"  # Default extension
             temp_file = tempfile.NamedTemporaryFile(
                 delete=False,
@@ -308,11 +399,11 @@ async def process_video_url(request: ProcessUrlRequest):
             temp_file.close()
             video_path = Path(temp_file.name)
             await download_video_from_url(url, video_path)
-        
-        # Get video duration
-        duration_seconds = get_video_duration(str(video_path))
-        duration_formatted = format_timestamp(duration_seconds)
-        
+
+            # Get video duration for non-GCP URLs
+            duration_seconds = get_video_duration(str(video_path))
+            duration_formatted = format_timestamp(duration_seconds)
+
         # Create video record with "processing" status
         video_data = {
             "video_url": url,
@@ -322,14 +413,35 @@ async def process_video_url(request: ProcessUrlRequest):
             "frame_interval": frame_interval,
             "total_frames": 0,
         }
-        
+
         video_record = create_video(video_data)
         video_id = video_record["id"]
-        
+
         try:
-            # Process video
-            summaries = process_video(str(video_path), interval=frame_interval)
-            
+            # If video is already in GCP, extract bucket and blob path
+            if is_gcp_url:
+                # Parse GCP URL to get bucket and blob path
+                logger.info("Parsing GCP URL: %s", url)
+                gcp_bucket_name, gcp_blob_path = parse_gcp_url(url)
+            else:
+                # Upload video to GCP first (Modal function requires GCP path)
+                logger.info("Uploading video to GCP for processing...")
+                gcp_bucket_name, gcp_blob_path = upload_file_to_gcp(video_path)
+
+            # Process video using Modal
+            if modal_app is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Modal function not available. Please deploy the video processor first."
+                )
+
+            logger.info("Calling Modal function to process video...")
+            summaries = modal_app.remote(
+                gcp_bucket_name=gcp_bucket_name,
+                gcp_blob_path=gcp_blob_path,
+                interval=frame_interval
+            )
+
             # Create summary records
             summary_records = []
             for summary in summaries:
@@ -340,13 +452,13 @@ async def process_video_url(request: ProcessUrlRequest):
                     "description": summary["description"],
                     "frame_number": summary["frame_number"],
                 })
-            
+
             if summary_records:
                 create_video_summaries(summary_records)
-            
+
             # Aggregate key topics
             key_topics = aggregate_key_topics(summaries)
-            
+
             # Update video record with completed status
             update_video(
                 video_id,
@@ -356,22 +468,24 @@ async def process_video_url(request: ProcessUrlRequest):
                     "key_topics": key_topics,
                 }
             )
-            
+
             # Get updated video with summaries
             video = get_video_with_summaries(UUID(video_id))
-            
+
             if not video:
-                raise HTTPException(status_code=404, detail="Video not found after processing")
-            
+                raise HTTPException(
+                    status_code=404, detail="Video not found after processing")
+
             # Convert to response model (handles camelCase conversion)
             return VideoResponse(**video)
-            
+
         except Exception as e:
             logger.error("Error processing video: %s", e)
             # Update status to failed
             update_video(video_id, {"status": "failed"})
-            raise HTTPException(status_code=500, detail=f"Error processing video: {str(e)}")
-        
+            raise HTTPException(
+                status_code=500, detail=f"Error processing video: {str(e)}")
+
         finally:
             # Clean up temporary file (only if it's a temp file, not if it's from GCP)
             try:
@@ -379,31 +493,33 @@ async def process_video_url(request: ProcessUrlRequest):
                     video_path.unlink()
             except Exception as e:
                 logger.warning("Error deleting temporary file: %s", e)
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Error processing video URL: %s", e)
-        raise HTTPException(status_code=500, detail=f"Error processing video URL: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error processing video URL: {str(e)}")
 
 
 @app.get("/videos", response_model=VideoListResponse)
 async def list_all_videos(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of records to return"),
+    limit: int = Query(
+        10, ge=1, le=100, description="Maximum number of records to return"),
 ):
     """
     List all videos with pagination.
-    
+
     - **skip**: Number of records to skip (default: 0)
     - **limit**: Maximum number of records to return (default: 10, max: 100)
     """
     try:
         videos_data, total = list_videos(skip=skip, limit=limit)
-        
+
         # Convert to response models
         videos = [VideoResponse(**video) for video in videos_data]
-        
+
         return VideoListResponse(
             videos=videos,
             total=total,
@@ -412,39 +528,42 @@ async def list_all_videos(
         )
     except Exception as e:
         logger.error(f"Error listing videos: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing videos: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error listing videos: {str(e)}")
 
 
 @app.get("/videos/{video_id}", response_model=VideoResponse)
 async def get_video_by_id(video_id: UUID):
     """
     Get a single video by ID with all its summaries.
-    
+
     - **video_id**: UUID of the video
     """
     try:
         video = get_video_with_summaries(video_id)
-        
+
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
-        
+
         return VideoResponse(**video)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting video {video_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting video: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error getting video: {str(e)}")
 
 
 @app.get("/videos/{video_id}/summaries")
 async def get_video_summaries_endpoint(
     video_id: UUID,
     skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    limit: int = Query(100, ge=1, le=1000,
+                       description="Maximum number of records to return"),
 ):
     """
     Get summaries for a video with pagination.
-    
+
     - **video_id**: UUID of the video
     - **skip**: Number of records to skip (default: 0)
     - **limit**: Maximum number of records to return (default: 100, max: 1000)
@@ -454,12 +573,14 @@ async def get_video_summaries_endpoint(
         video = get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
-        
-        summaries_data, total = get_video_summaries(video_id, skip=skip, limit=limit)
-        
+
+        summaries_data, total = get_video_summaries(
+            video_id, skip=skip, limit=limit)
+
         # Convert to response models
-        summaries = [VideoSummaryResponse(**summary) for summary in summaries_data]
-        
+        summaries = [VideoSummaryResponse(**summary)
+                     for summary in summaries_data]
+
         return {
             "summaries": summaries,
             "total": total,
@@ -470,7 +591,67 @@ async def get_video_summaries_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error getting video summaries for {video_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting video summaries: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error getting video summaries: {str(e)}")
+
+
+# API endpoints with API key authentication
+@app.get("/api/videos", response_model=VideoListResponse)
+async def api_list_all_videos(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(
+        10, ge=1, le=100, description="Maximum number of records to return"),
+    _api_key: str = Depends(verify_api_key),
+):
+    """
+    List all videos with pagination (requires API key).
+
+    - **skip**: Number of records to skip (default: 0)
+    - **limit**: Maximum number of records to return (default: 10, max: 100)
+    - **X-API-Key**: API key in header (required)
+    """
+    try:
+        videos_data, total = list_videos(skip=skip, limit=limit)
+
+        # Convert to response models
+        videos = [VideoResponse(**video) for video in videos_data]
+
+        return VideoListResponse(
+            videos=videos,
+            total=total,
+            skip=skip,
+            limit=limit,
+        )
+    except Exception as e:
+        logger.error(f"Error listing videos: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error listing videos: {str(e)}")
+
+
+@app.get("/api/videos/{video_id}", response_model=VideoResponse)
+async def api_get_video_by_id(
+    video_id: UUID,
+    _api_key: str = Depends(verify_api_key),
+):
+    """
+    Get a single video by ID with all its summaries (requires API key).
+
+    - **video_id**: UUID of the video
+    - **X-API-Key**: API key in header (required)
+    """
+    try:
+        video = get_video_with_summaries(video_id)
+
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        return VideoResponse(**video)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting video {video_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error getting video: {str(e)}")
 
 
 if __name__ == "__main__":

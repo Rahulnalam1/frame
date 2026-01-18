@@ -4,6 +4,8 @@ from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
 
+from config import settings
+
 
 class VideoSummaryResponse(BaseModel):
     """Response model for a single video summary."""
@@ -51,7 +53,7 @@ class ProcessUrlRequest(BaseModel):
     """Request model for processing a video from URL."""
     url: str = Field(..., description="URL of the video to process")
     frameInterval: Optional[int] = Field(
-        2, description="Seconds between frames", ge=1, le=60)
+        settings.DEFAULT_FRAME_INTERVAL, description="Seconds between frames", ge=1, le=60)
     title: Optional[str] = Field(
         None, description="Optional title for the video")
 
@@ -62,7 +64,7 @@ class VideoCreateRequest(BaseModel):
     title: Optional[str] = None
     duration: str
     status: str = "processing"
-    frameInterval: int = 2
+    frameInterval: int = settings.DEFAULT_FRAME_INTERVAL
 
 
 class VideoSummaryCreateRequest(BaseModel):
@@ -77,6 +79,20 @@ class VideoSummaryCreateRequest(BaseModel):
 class YouTubeUploadRequest(BaseModel):
     """Request model for uploading a YouTube video to GCP."""
     url: str = Field(..., description="YouTube video URL")
-    preferredQuality: Optional[str] = Field("480p", description="Video quality preference")
-    preferredFormat: Optional[str] = Field("mp4", description="Video format preference")
-    title: Optional[str] = Field(None, description="Optional title for the video")
+    preferredQuality: Optional[str] = Field(
+        "480p", description="Video quality preference")
+    preferredFormat: Optional[str] = Field(
+        "mp4", description="Video format preference")
+    title: Optional[str] = Field(
+        None, description="Optional title for the video")
+
+
+class ApiKeyResponse(BaseModel):
+    """Response model for API key generation."""
+    apiKey: str = Field(alias="api_key")
+    createdAt: datetime = Field(alias="created_at")
+    id: UUID
+
+    class Config:
+        populate_by_name = True
+        from_attributes = True

@@ -1,248 +1,196 @@
-"""Video processing functions for frame extraction and summarization."""
-import cv2
-import torch
-from PIL import Image
-from typing import List, Tuple
-from transformers import AutoProcessor, AutoModelForVision2Seq
-import logging
+# video_processor.py
+import modal
+import json
+from typing import List, Dict
 
-from config import settings
+app = modal.App("video-frame-processor")
 
-logger = logging.getLogger(__name__)
-
-# Global model and processor (loaded on first use)
-_model = None
-_processor = None
-
-
-def get_device():
-    """Determine the best available device for model inference."""
-    if torch.backends.mps.is_available():
-        return "mps"
-    elif torch.cuda.is_available():
-        return "cuda"
-    else:
-        return "cpu"
+# Minimal FFmpeg install
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("ffmpeg")
+    .pip_install("numpy==1.26.4")
+    .pip_install(
+        "accelerate>=0.25.0",
+        "google-cloud-storage==2.14.0",
+        "opencv-python-headless==4.10.0.84",
+        "pillow==10.1.0",
+        "torch==2.1.0",
+        "transformers==4.46.3",
+    )
+)
 
 
-def load_model():
-    """Load the vision model and processor (singleton pattern)."""
-    global _model, _processor
+@app.function(
+    image=image,
+    gpu="A10G",
+    timeout=3600,
+    secrets=[modal.Secret.from_name("gcp-secret")],
+    memory=16384,
+)
+def process_video_on_gpu(
+    gcp_bucket_name: str,
+    gcp_blob_path: str,
+    interval: int = 2,
+    batch_size: int = 8,
+    model_id: str = "HuggingFaceTB/SmolVLM-Instruct"
+) -> List[Dict]:
+    """Process video frames on Modal GPU."""
+    import cv2
+    import torch
+    import subprocess
+    from PIL import Image
+    from transformers import AutoProcessor, AutoModelForVision2Seq
+    from google.cloud import storage
+    from google.oauth2 import service_account
+    import os
+    import json
+    import tempfile
 
-    if _model is not None and _processor is not None:
-        return _model, _processor
+    print(f"Starting video processing: {gcp_blob_path}")
+    print(f"GPU available: {torch.cuda.is_available()}")
 
-    try:
-        logger.info(f"Loading model: {settings.MODEL_ID}")
-        device = get_device()
-        logger.info(f"Using device: {device}")
+    # Download video from GCP
+    print("Downloading video from GCP...")
+    credentials_json = os.environ.get("GCP_SERVICE_KEY")
+    credentials_dict = json.loads(credentials_json)
+    credentials = service_account.Credentials.from_service_account_info(
+        credentials_dict)
 
-        _processor = AutoProcessor.from_pretrained(settings.MODEL_ID)
+    storage_client = storage.Client(credentials=credentials)
+    bucket = storage_client.bucket(gcp_bucket_name)
+    blob = bucket.blob(gcp_blob_path)
 
-        # Load model first, then handle dtype and device separately
-        # This avoids issues with unsupported parameters
-        _model = AutoModelForVision2Seq.from_pretrained(settings.MODEL_ID)
+    with tempfile.NamedTemporaryFile(delete=False, suffix='_original.mp4') as tmp_file:
+        blob.download_to_filename(tmp_file.name)
+        original_video_path = tmp_file.name
 
-        # Convert dtype based on device
-        if device == "cpu":
-            # For CPU, use float32
-            _model = _model.to(dtype=torch.float32)
-        else:
-            # For GPU/MPS, use float16 for efficiency
-            _model = _model.to(dtype=torch.float16)
+    # Convert to H.264
+    print("Converting video to H.264...")
+    with tempfile.NamedTemporaryFile(delete=False, suffix='_converted.mp4') as converted_file:
+        converted_video_path = converted_file.name
 
-        # Move to device
-        if device == "mps":
-            _model = _model.to("mps")
-        elif device == "cuda":
-            _model = _model.to("cuda")
-        # CPU is already handled by default
+    ffmpeg_cmd = [
+        'ffmpeg', '-i', original_video_path,
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-c:a', 'aac', '-y', converted_video_path
+    ]
 
-        _model.eval()
-        logger.info("Model loaded successfully")
-
-        return _model, _processor
-    except Exception as e:
-        logger.error(f"Error loading model: {e}")
-        raise
-
-
-def extract_frames(video_path: str, interval: int = 2) -> Tuple[List[Image.Image], List[float]]:
-    """
-    Extract frames from a video at specified intervals.
-
-    Args:
-        video_path: Path to the video file
-        interval: Seconds between frames (default: 2)
-
-    Returns:
-        Tuple of (frames list, timestamps list)
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError(f"Could not open video file: {video_path}")
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps == 0:
-        cap.release()
-        raise ValueError("Could not determine video FPS")
-
-    frame_interval = int(fps * interval)
-    frames = []
-    frame_count = 0
-    timestamps = []
+    subprocess.run(ffmpeg_cmd, capture_output=True, check=True)
+    print("Video converted")
 
     try:
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+        # Extract frames
+        print("Extracting frames...")
+        frames, timestamps = extract_frames(converted_video_path, interval)
+        print(f"Extracted {len(frames)} frames")
 
-            if frame_count % frame_interval == 0:
-                # Convert BGR to RGB
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames.append(Image.fromarray(rgb_frame))
-                timestamps.append(frame_count / fps)
+        # Load model
+        print(f"Loading model: {model_id}")
+        processor = AutoProcessor.from_pretrained(model_id)
+        model = AutoModelForVision2Seq.from_pretrained(
+            model_id, torch_dtype=torch.float16, device_map="auto"
+        )
+        model.eval()
+        print("Model loaded")
 
-            frame_count += 1
+        # Process frames
+        descriptions = []
+        for i in range(0, len(frames), batch_size):
+            batch = frames[i:i+batch_size]
+            batch_descriptions = process_batch(batch, model, processor)
+            descriptions.extend(batch_descriptions)
+            print(
+                f"Processed {min(i+batch_size, len(frames))}/{len(frames)} frames")
+
+        summaries = []
+        for i, (ts, desc) in enumerate(zip(timestamps, descriptions)):
+            summaries.append({
+                "timestamp": format_timestamp(ts),
+                "timestamp_seconds": ts,
+                "description": desc,
+                "frame_number": i
+            })
+
+        return summaries
     finally:
-        cap.release()
+        os.remove(original_video_path)
+        os.remove(converted_video_path)
 
+
+def extract_frames(video_path: str, interval: int = 2):
+    import cv2
+    from PIL import Image
+
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_interval = int(fps * interval)
+    frames, timestamps = [], []
+    frame_count = 0
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_count % frame_interval == 0:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(Image.fromarray(rgb_frame))
+            timestamps.append(frame_count / fps)
+        frame_count += 1
+
+    cap.release()
     return frames, timestamps
 
 
-def summarize_frame(image: Image.Image, prompt: str = "Describe what's happening in this scene.") -> str:
-    """
-    Generate a summary/description for a single frame using the vision model.
+def process_batch(images, model, processor):
+    import torch
 
-    Args:
-        image: PIL Image object
-        prompt: Text prompt for the model
+    descriptions = []
 
-    Returns:
-        Description string
-    """
-    model, processor = load_model()
-
-    messages = [
-        {
+    # Process each image individually (batching doesn't work well with this model)
+    for image in images:
+        messages = [{
             "role": "user",
             "content": [
                 {"type": "image"},
-                {"type": "text", "text": prompt}
+                {"type": "text", "text": "Describe what's happening in this video."}
             ]
-        }
-    ]
+        }]
 
-    prompt_text = processor.apply_chat_template(
-        messages, add_generation_prompt=True)
-    inputs = processor(text=prompt_text, images=[image], return_tensors="pt")
+        prompt_text = processor.apply_chat_template(
+            messages, add_generation_prompt=True)
+        inputs = processor(text=prompt_text, images=[
+                           image], return_tensors="pt")
 
-    # Move inputs to the same device as the model
-    device = next(model.parameters()).device
-    inputs = {k: v.to(device) for k, v in inputs.items()}
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
 
-    with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=100)
+        with torch.no_grad():
+            outputs = model.generate(**inputs, max_new_tokens=100)
 
-    # Decode the output
-    decoded = processor.decode(outputs[0], skip_special_tokens=True)
+        decoded = processor.decode(outputs[0], skip_special_tokens=True)
+        desc = decoded.split(
+            "Assistant:")[-1].strip() if "Assistant:" in decoded else decoded.strip()
+        descriptions.append(desc)
 
-    # Extract just the assistant's response (remove the prompt text)
-    # The model returns the full conversation, we want just the assistant part
-    if "Assistant:" in decoded:
-        assistant_response = decoded.split("Assistant:")[-1].strip()
-        return assistant_response
-    else:
-        # Fallback: return the decoded text as-is
-        return decoded.strip()
+    return descriptions
 
 
 def format_timestamp(seconds: float) -> str:
-    """
-    Format timestamp in seconds to MM:SS or HH:MM:SS format.
-
-    Args:
-        seconds: Timestamp in seconds
-
-    Returns:
-        Formatted timestamp string
-    """
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
-
-    if hours > 0:
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    else:
-        return f"{minutes}:{secs:02d}"
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours > 0 else f"{minutes}:{secs:02d}"
 
 
-def get_video_duration(video_path: str) -> float:
-    """
-    Get the duration of a video in seconds.
-
-    Args:
-        video_path: Path to the video file
-
-    Returns:
-        Duration in seconds
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError(f"Could not open video file: {video_path}")
-
-    try:
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-        if fps > 0:
-            duration = frame_count / fps
-            return duration
-        else:
-            return 0.0
-    finally:
-        cap.release()
-
-
-def process_video(video_path: str, interval: int = 2) -> List[dict]:
-    """
-    Process a video and generate summaries for frames at specified intervals.
-
-    Args:
-        video_path: Path to the video file
-        interval: Seconds between frames (default: 2)
-
-    Returns:
-        List of summary dictionaries with timestamp and description
-    """
-    logger.info(f"Processing video: {video_path} with interval: {interval}s")
-
-    # Extract frames
-    frames, timestamps = extract_frames(video_path, interval)
-    logger.info(f"Extracted {len(frames)} frames")
-
-    # Process each frame
-    summaries = []
-    for i, (frame, ts) in enumerate(zip(frames, timestamps)):
-        try:
-            logger.info(
-                f"Processing frame {i+1}/{len(frames)} at {format_timestamp(ts)}")
-            description = summarize_frame(frame)
-            summaries.append({
-                "timestamp": format_timestamp(ts),
-                "timestamp_seconds": ts,
-                "description": description,
-                "frame_number": i
-            })
-        except Exception as e:
-            logger.error(f"Error processing frame {i+1}: {e}")
-            # Continue with other frames even if one fails
-            summaries.append({
-                "timestamp": format_timestamp(ts),
-                "timestamp_seconds": ts,
-                "description": f"Error processing frame: {str(e)}",
-                "frame_number": i
-            })
-
-    logger.info(f"Completed processing {len(summaries)} frames")
-    return summaries
+@app.local_entrypoint()
+def test():
+    """Test the Modal function locally."""
+    result = process_video_on_gpu.remote(
+        gcp_bucket_name="youtube_storage_nex",
+        # Try the other video
+        gcp_blob_path="_Td7JjCTfyc_30 second animation assignment.mp4.mp4",
+        interval=2,
+        batch_size=8
+    )
+    print(json.dumps(result[:3], indent=2))  # Print first 3 results

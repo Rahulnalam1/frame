@@ -30,7 +30,7 @@ class Settings:
 
     # Frame processing
     DEFAULT_FRAME_INTERVAL: int = int(
-        os.getenv("FRAME_INTERVAL", "2"))  # seconds
+        os.getenv("FRAME_INTERVAL", "5"))  # seconds
 
     # Apify configuration
     APIFY_API_KEY: str = os.getenv("APIFY_API_KEY", "")
