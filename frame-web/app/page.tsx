@@ -804,7 +804,7 @@ export default function Page() {
                 variants={container}
                 initial="hidden"
                 animate="show"
-                className="flex-grow flex justify-center px-4 pt-2"
+                className="flex-grow flex justify-center px-4 pt-2 pb-20"
             >
                 <div className="max-w-[660px] w-full">
                     {/* Introduction section */}

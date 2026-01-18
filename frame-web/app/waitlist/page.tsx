@@ -63,7 +63,7 @@ export default function WaitlistPage() {
                     ease: "easeOut",
                     delay: 0.3
                 }}
-                className="flex-grow flex justify-center px-4 pt-2"
+                className="flex-grow flex justify-center px-4 pt-2 pb-20"
             >
                 <div className="max-w-[660px] w-full space-y-6">
                     {/* Header outside the card */}
