@@ -2,18 +2,29 @@
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function WaitlistPage() {
-    const [email, setEmail] = useState('');
-    const [submitted, setSubmitted] = useState(false);
+    const [isJoined, setIsJoined] = useState(false);
+    const [totalPeople, setTotalPeople] = useState(0);
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        // In production, send email to your backend
-        console.log('Waitlist email:', email);
-        setSubmitted(true);
-        setEmail('');
+    // Load count from localStorage on mount
+    useEffect(() => {
+        const savedCount = localStorage.getItem('waitlistCount');
+        if (savedCount) {
+            setTotalPeople(parseInt(savedCount));
+        }
+    }, []);
+
+    const handleJoinWaitlist = () => {
+        if (!isJoined) {
+            const newCount = totalPeople + 1;
+            setTotalPeople(newCount);
+            setIsJoined(true);
+            
+            // Save to localStorage
+            localStorage.setItem('waitlistCount', newCount.toString());
+        }
     };
 
     return (
@@ -76,45 +87,25 @@ export default function WaitlistPage() {
                 }}
                 className="flex-grow flex justify-center px-4 pt-2"
             >
-                <div className="max-w-[660px] w-full">
-                    <div className="text-white text-[15px] leading-relaxed">
-                        <h1 className="text-[15px] font-normal text-white mb-6">
-                            Join the Waitlist
-                        </h1>
-                        <p className="text-[#a1a1aa] mb-8">
-                            Get early access to Frame. We&apos;ll notify you when we launch.
-                        </p>
-
-                        {submitted ? (
-                            <motion.div
-                                initial={{ opacity: 0, y: 5 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="p-4 bg-[#252525] rounded-lg border border-[#3a3a3a]"
-                            >
-                                <p className="text-white text-[15px]">
-                                    Thanks for joining! We&apos;ll be in touch soon.
-                                </p>
-                            </motion.div>
-                        ) : (
-                            <form onSubmit={handleSubmit} className="space-y-4">
-                                <div>
-                                    <input
-                                        type="email"
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                        placeholder="your@email.com"
-                                        required
-                                        className="w-full px-4 py-3 bg-[#252525] border border-[#3a3a3a] rounded-lg text-white text-[15px] placeholder:text-[#737373] focus:outline-none focus:border-[#737373] transition-colors"
-                                    />
-                                </div>
-                                <Button
-                                    type="submit"
-                                    className="w-full bg-white text-black hover:bg-[#e5e5e5] transition-colors py-3 text-[15px]"
+                <div className="max-w-[660px] w-full space-y-6">
+                    {/* Header outside the card */}
+                    <div>
+                        <h1 className="text-[15px] font-normal text-white mb-1">
+                            {!isJoined ? (
+                                <Button 
+                                    variant="link" 
+                                    onClick={handleJoinWaitlist}
+                                    className="text-white hover:text-[#a1a1aa] text-[15px] p-0 h-auto font-normal"
                                 >
-                                    Join Waitlist
+                                    join the waitlist
                                 </Button>
-                            </form>
-                        )}
+                            ) : (
+                                <span>you and {totalPeople} other {totalPeople === 1 ? 'person has' : 'people have'} joined the waitlist</span>
+                            )}
+                        </h1>
+                        <p className="text-[#737373] text-[15px]">
+                            get early access to frame. we&apos;ll notify you when we launch.
+                        </p>
                     </div>
                 </div>
             </motion.div>
