@@ -1,13 +1,13 @@
 'use client';
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { TextShimmer } from '@/components/ui/text-shimmer';
 import { TextScramble } from '@/components/ui/text-scramble';
 import { Key } from 'lucide-react';
 import type { Variants } from 'framer-motion';
-import { generateApiKey } from '@/lib/api';
+import { generateApiKey, uploadYouTubeVideo, processVideoUrl } from '@/lib/api';
 import {
   Tooltip,
   TooltipContent,
@@ -55,6 +55,11 @@ export default function Page() {
     const [showCopiedTooltip, setShowCopiedTooltip] = useState(false);
     const [copiedUrlRowId, setCopiedUrlRowId] = useState<string | null>(null);
     const [apiKey, setApiKey] = useState<string>('');
+    // Processing queue state
+    const [processingQueue, setProcessingQueue] = useState<Array<{ url: string; rowId: string; title: string }>>([]);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [processingRowId, setProcessingRowId] = useState<string | null>(null);
+    const processingRef = useRef(false);
 
     const extractVideoId = (url: string) => {
         // Extract video ID from various YouTube URL formats
@@ -69,6 +74,91 @@ export default function Page() {
         }
         return null;
     };
+
+    const processVideoWithBackend = async (url: string, rowId: string, title: string) => {
+        try {
+            // Update status to "Processing..."
+            updateRowData(rowId, { status: "Processing..." });
+            setProcessingRowId(rowId);
+
+            console.log(`🔄 Starting backend processing for row ${rowId}: ${title}`);
+
+            // Step 1: Upload YouTube video to GCP
+            console.log(`📤 Uploading YouTube video to GCP...`);
+            const uploadResponse = await uploadYouTubeVideo(url, title);
+            const gcpUrl = uploadResponse.gcpUrl;
+
+            if (!gcpUrl) {
+                throw new Error("Failed to get GCP URL from upload response");
+            }
+
+            console.log(`✅ Video uploaded to GCP: ${gcpUrl}`);
+
+            // Step 2: Process video URL (processes and stores in Supabase)
+            console.log(`⚙️ Processing video and storing in Supabase...`);
+            const processResponse = await processVideoUrl(gcpUrl, 5, title);
+
+            console.log(`✅ Video processed successfully. Video ID: ${processResponse.id}`);
+
+            // Update status to "Completed"
+            // Get current keyTopics from state to preserve it if processResponse doesn't have it
+            setRows(currentRows => {
+                const currentRow = currentRows.find(r => r.id === rowId);
+                return currentRows.map(row => 
+                    row.id === rowId ? { 
+                        ...row, 
+                        status: "Completed",
+                        keyTopics: processResponse.keyTopics || row.keyTopics || ""
+                    } : row
+                );
+            });
+
+            setProcessingRowId(null);
+            return true;
+        } catch (error) {
+            console.error(`❌ Error processing video for row ${rowId}:`, error);
+            
+            // Update status to show error
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            updateRowData(rowId, { 
+                status: `Failed: ${errorMessage.substring(0, 50)}${errorMessage.length > 50 ? '...' : ''}`
+            });
+
+            setProcessingRowId(null);
+            return false;
+        }
+    };
+
+    // Process queue sequentially (one video at a time)
+    useEffect(() => {
+        // Don't start processing if already processing or queue is empty
+        if (processingRef.current || processingQueue.length === 0) {
+            return;
+        }
+
+        const processNextInQueue = async () => {
+            processingRef.current = true;
+            setIsProcessing(true);
+            
+            const nextItem = processingQueue[0];
+            console.log(`📋 Processing queue item: ${nextItem.title} (${processingQueue.length} items in queue)`);
+
+            try {
+                // Process the video
+                await processVideoWithBackend(nextItem.url, nextItem.rowId, nextItem.title);
+            } catch (error) {
+                console.error('Error processing video:', error);
+            } finally {
+                // Remove processed item from queue - this will trigger the effect again
+                setProcessingQueue(prev => prev.slice(1));
+                processingRef.current = false;
+                setIsProcessing(false);
+            }
+        };
+
+        processNextInQueue();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [processingQueue.length]);
 
     const fetchVideoData = async (url: string, rowId: string) => {
         if (!url) return;
@@ -154,6 +244,14 @@ export default function Page() {
             await animateDataPopulation(videoInfo, rowId);
             
             console.log(`✅ Row ${rowId} populated`);
+            
+            // Add to processing queue for backend processing
+            setProcessingQueue(prev => [...prev, {
+                url: url,
+                rowId: rowId,
+                title: snippet.title || "Video Title"
+            }]);
+            console.log(`📋 Added video to processing queue: ${snippet.title}`);
             
             // Enhance with Tavily in background (non-blocking)
             enhanceKeyTopicsWithTavily(snippet.title, snippet.channelTitle, rowId);
@@ -615,6 +713,7 @@ export default function Page() {
 
         loadApiKey();
     }, []);
+
 
     const container: Variants = {
         hidden: { opacity: 0 },
