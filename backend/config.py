@@ -32,6 +32,16 @@ class Settings:
     DEFAULT_FRAME_INTERVAL: int = int(
         os.getenv("FRAME_INTERVAL", "2"))  # seconds
 
+    # Apify configuration
+    APIFY_API_KEY: str = os.getenv("APIFY_API_KEY", "")
+    APIFY_ACTOR_ID: str = os.getenv("APIFY_ACTOR_ID", "UUhJDfKJT2SsXdclR")
+
+    # Google Cloud Storage configuration
+    GCP_BUCKET_NAME: str = os.getenv("GCP_BUCKET_NAME", "")
+    GCP_SERVICE_KEY_PATH: Path = Path(
+        os.getenv("GCP_SERVICE_KEY_PATH", str(BASE_DIR / "service-key.json"))
+    )
+
     def __init__(self):
         """Initialize settings and create upload directory if it doesn't exist."""
         self.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

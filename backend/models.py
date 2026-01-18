@@ -72,3 +72,11 @@ class VideoSummaryCreateRequest(BaseModel):
     timestampSeconds: float
     description: str
     frameNumber: int
+
+
+class YouTubeUploadRequest(BaseModel):
+    """Request model for uploading a YouTube video to GCP."""
+    url: str = Field(..., description="YouTube video URL")
+    preferredQuality: Optional[str] = Field("480p", description="Video quality preference")
+    preferredFormat: Optional[str] = Field("mp4", description="Video format preference")
+    title: Optional[str] = Field(None, description="Optional title for the video")

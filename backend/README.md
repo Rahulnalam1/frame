@@ -1,3 +1,4 @@
+uvicorn main:app --reload
 # Frame Video Processing Backend
 
 FastAPI backend for processing videos and extracting frame summaries using the SmolVLM-Instruct vision model.
