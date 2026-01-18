@@ -113,7 +113,7 @@ export async function generateApiKey(): Promise<ApiKeyResponse> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-  },
+    },
   });
 
   if (!response.ok) {

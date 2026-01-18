@@ -1,0 +1,305 @@
+{
+  "model_id": "99qKv5bY7hcobPraftoj",
+  "analysis": {
+    "total_videos": 14,
+    "num_clusters": 8,
+    "clusters": {
+      "cluster_0": {
+        "video_count": 4,
+        "percentage": 28.57142857142857,
+        "avg_duration": 0.0,
+        "avg_topics": 0.0,
+        "avg_scene_change_rate": 0.0,
+        "top_topics": [],
+        "video_titles": [
+          "TEST MODEL??",
+          "TEST MODEL??",
+          "TEST MODEL??",
+          "Never Gonna Give You Up - Rick Astley [REIMAGINED]"
+        ]
+      },
+      "cluster_1": {
+        "video_count": 2,
+        "percentage": 14.285714285714285,
+        "avg_duration": 0.5,
+        "avg_topics": 14.0,
+        "avg_scene_change_rate": 21.0,
+        "top_topics": [
+          "The image depicts a scene from a commercial for Pringles potato chips. The setting is a kitchen",
+          " The image shows...",
+          "image",
+          " including a stove",
+          " a refrigerator"
+        ],
+        "video_titles": [
+          "Pringles Ad",
+          "Pringles Ad 2"
+        ]
+      },
+      "cluster_2": {
+        "video_count": 3,
+        "percentage": 21.428571428571427,
+        "avg_duration": 0.19999999999999998,
+        "avg_topics": 7.0,
+        "avg_scene_change_rate": 4.827586206896552,
+        "top_topics": [
+          "image",
+          "white",
+          "boat",
+          "idefics3forconditionalgeneration.__init__()",
+          "error"
+        ],
+        "video_titles": [
+          "Rahul Motorcycle",
+          "Animation Video",
+          "Model 123"
+        ]
+      },
+      "cluster_3": {
+        "video_count": 1,
+        "percentage": 7.142857142857142,
+        "avg_duration": 0.11666666666666667,
+        "avg_topics": 10.0,
+        "avg_scene_change_rate": 0.0,
+        "top_topics": [
+          " wearing a helmet and a dark shirt. The motorcycle is parked on the street",
+          "motorcycle",
+          " also wearing a helmet and sunglasses. In the background",
+          " and...",
+          "parked"
+        ],
+        "video_titles": [
+          "Rahul Motorcycle"
+        ]
+      },
+      "cluster_4": {
+        "video_count": 1,
+        "percentage": 7.142857142857142,
+        "avg_duration": 0.0,
+        "avg_topics": 12.0,
+        "avg_scene_change_rate": 0.0,
+        "top_topics": [
+          "image",
+          " which is part of the house where the movie is set. The hallway is well-lit",
+          " portrayed by the actor Edgardo Saverin. The scene takes place in a hallway",
+          "A man is walking down a hallway in a fancy restaurant. The image depicts a scene from the movie \"The Social Network",
+          "scene"
+        ],
+        "video_titles": [
+          null
+        ]
+      },
+      "cluster_5": {
+        "video_count": 1,
+        "percentage": 7.142857142857142,
+        "avg_duration": 0.0,
+        "avg_topics": 11.0,
+        "avg_scene_change_rate": 0.0,
+        "top_topics": [
+          " while the tilted can has a matte finish. The upright...",
+          "image",
+          " while the tilted can is positioned to the left of the upright can. Both cans are red and white in color",
+          "glass",
+          "bottle"
+        ],
+        "video_titles": [
+          "Coca-Cola | For Everyone :30"
+        ]
+      },
+      "cluster_6": {
+        "video_count": 1,
+        "percentage": 7.142857142857142,
+        "avg_duration": 16.333333333333332,
+        "avg_topics": 0.0,
+        "avg_scene_change_rate": 0.0,
+        "top_topics": [],
+        "video_titles": [
+          "iPhone Video"
+        ]
+      },
+      "cluster_7": {
+        "video_count": 1,
+        "percentage": 7.142857142857142,
+        "avg_duration": 0.48333333333333334,
+        "avg_topics": 0.0,
+        "avg_scene_change_rate": 0.0,
+        "top_topics": [],
+        "video_titles": [
+          "Animation Video"
+        ]
+      }
+    }
+  },
+  "gaps": {
+    "underrepresented_patterns": [],
+    "overrepresented_patterns": [
+      {
+        "cluster": "cluster_0",
+        "current_count": 4,
+        "percentage": 28.57142857142857,
+        "pattern": {
+          "duration": 0.0,
+          "topics": []
+        }
+      },
+      {
+        "cluster": "cluster_2",
+        "current_count": 3,
+        "percentage": 21.428571428571427,
+        "pattern": {
+          "duration": 0.19999999999999998,
+          "topics": [
+            "image",
+            "white",
+            "boat",
+            "idefics3forconditionalgeneration.__init__()",
+            "error"
+          ]
+        }
+      }
+    ],
+    "recommendations": []
+  },
+  "clustered_videos": [
+    {
+      "video_id": "5a4fdf0b-47e6-431e-ab9b-c3cbc86f758f",
+      "title": "Rahul Motorcycle",
+      "cluster": 2,
+      "cluster_description": "This group of content patterns is characterized by a high description variance and a moderate scene change rate, and they almost certainly do not contain black elements or specific commercial-related descriptions. They are unusual for consistently featuring boats, abundant white elements, and significant processing errors, suggesting issues with image processing or content generation.",
+      "duration_minutes": 0.11666666666666667,
+      "unique_topics": 6,
+      "scene_change_rate": 0.0,
+      "topics": "[\"idefics3forconditionalgeneration.__init__()\", \"error\", \"Error processing frame: Idefics3ForConditionalGeneration.__init__() got an unexpected keyword argument 'dtype' Error processing frame: Idefics3ForConditionalGeneration.__init__() got an unexpected keyword argument 'dtype' Error processing frame: Idefics3ForConditionalGeneration.__init__() got an unexpected keyword argument 'dtype' Error processing frame: Idefics3ForConditionalGeneration.__init__() got an unexpected keyword argument 'dtype'\", \"unexpected\", \"frame:\", \"processing\"]"
+    },
+    {
+      "video_id": "270fc51d-7d3d-4a62-b344-060161673c76",
+      "title": "Rahul Motorcycle",
+      "cluster": 3,
+      "cluster_description": "This group of instances is characterized by an absence of Idefics3ForConditionalGeneration initialization, processing errors, and boats. They are also less likely to have specific scene change rates.",
+      "duration_minutes": 0.11666666666666667,
+      "unique_topics": 10,
+      "scene_change_rate": 0.0,
+      "topics": "[\" wearing a helmet and a dark shirt. The motorcycle is parked on the street\", \"motorcycle\", \" also wearing a helmet and sunglasses. In the background\", \" and...\", \"parked\", \" there is a row of parked cars and a few houses. The sky is clear. A young man is getting ready to ride his motorcycle on the street. He is standing on the sidewalk next to the bike\", \"A young man is sitting on a black motorcycle on a sidewalk in front of a parked car. He is wearing a helmet and sunglasses. Another young man is standing on the sidewalk next to him\", \"helmet\", \"black\", \"wearing\"]"
+    },
+    {
+      "video_id": "7c41af94-1325-4127-9856-3af8d29b4c50",
+      "title": "iPhone Video",
+      "cluster": 6,
+      "cluster_description": "This group of instances is characterized by an absence of errors or specific initialization issues, very low scene change rates, and no variance in their descriptions. They are unusual because they do not contain images or scenes, have a very specific duration of 16.33 minutes, and zero frames per minute.",
+      "duration_minutes": 16.333333333333332,
+      "unique_topics": 0,
+      "scene_change_rate": 0.0,
+      "topics": "[]"
+    },
+    {
+      "video_id": "45c9e79c-756d-4dd6-8e2e-79ee05c8d61a",
+      "title": "Animation Video",
+      "cluster": 2,
+      "cluster_description": "This group of content patterns is characterized by a high description variance and a moderate scene change rate, and they almost certainly do not contain black elements or specific commercial-related descriptions. They are unusual for consistently featuring boats, abundant white elements, and significant processing errors, suggesting issues with image processing or content generation.",
+      "duration_minutes": 0.48333333333333334,
+      "unique_topics": 6,
+      "scene_change_rate": 14.482758620689655,
+      "topics": "[\"image\", \"sail\", \"white\", \"boat\", \"The image is a simple black and white photograph. The photograph is a close-up of a person's face. The person is looking directly at the camera. The person's face is not very expressive. The person's eyes are open wide and their mouth is closed. The person's skin is pale. The person's hair is short and dark. The person's ears are small and pointed. The person's nose is small and straight. The person's lips are thin and slightly pursed. The A red car is parked on a sidewalk. A red car is parked o...\", \"person's\"]"
+    },
+    {
+      "video_id": "5f87be63-ded9-4c66-9999-cb91f482b5d7",
+      "title": "Animation Video",
+      "cluster": 7,
+      "cluster_description": "This group of content patterns is characterized by a lack of advanced Idefics3 generation capabilities, no processing errors, and stable scene changes. They also show minimal variation in their descriptions.",
+      "duration_minutes": 0.48333333333333334,
+      "unique_topics": 0,
+      "scene_change_rate": 0.0,
+      "topics": "[]"
+    },
+    {
+      "video_id": "6ae2d2c7-5214-47f5-a2bf-23ec1032c8a1",
+      "title": "TEST MODEL??",
+      "cluster": 0,
+      "cluster_description": "This group of instances is characterized by a lack of advanced generation models, errors, or significant scene changes. Their descriptions also exhibit no variance, suggesting a consistent or absent descriptive element.",
+      "duration_minutes": 0.0,
+      "unique_topics": 0,
+      "scene_change_rate": 0.0,
+      "topics": "[]"
+    },
+    {
+      "video_id": "def38b70-d049-45f9-aeca-aa3388b425f0",
+      "title": "TEST MODEL??",
+      "cluster": 0,
+      "cluster_description": "This group of instances is characterized by a lack of advanced generation models, errors, or significant scene changes. Their descriptions also exhibit no variance, suggesting a consistent or absent descriptive element.",
+      "duration_minutes": 0.0,
+      "unique_topics": 0,
+      "scene_change_rate": 0.0,
+      "topics": "[]"
+    },
+    {
+      "video_id": "bfb6738f-99b9-4d54-a681-c9bdabc34e9d",
+      "title": "TEST MODEL??",
+      "cluster": 0,
+      "cluster_description": "This group of instances is characterized by a lack of advanced generation models, errors, or significant scene changes. Their descriptions also exhibit no variance, suggesting a consistent or absent descriptive element.",
+      "duration_minutes": 0.0,
+      "unique_topics": 0,
+      "scene_change_rate": 0.0,
+      "topics": "[]"
+    },
+    {
+      "video_id": "35756d29-19ff-4311-bf0a-867e3f6b88e2",
+      "title": "Model 123",
+      "cluster": 2,
+      "cluster_description": "This group of content patterns is characterized by a high description variance and a moderate scene change rate, and they almost certainly do not contain black elements or specific commercial-related descriptions. They are unusual for consistently featuring boats, abundant white elements, and significant processing errors, suggesting issues with image processing or content generation.",
+      "duration_minutes": 0.0,
+      "unique_topics": 9,
+      "scene_change_rate": 0.0,
+      "topics": "[\" with the light source coming from the windows on the left side of the image. The seats are arranged in a row\", \"image\", \"The image is a black background with no objects or text. A red car is parked on a street. A red car is driving down a street. The image depicts a scene inside a bus\", \"light\", \" with three people seated in the foreground. \\n\\nThe first person seated on the left side is a young woman with short white hair. She is wearing a pu...\", \"white\", \"boat\", \" likely during the evening or nighttime. The interior of the bus is dimly lit\", \"depicted\"]"
+    },
+    {
+      "video_id": "680c9b0a-22cd-491a-9f24-fb47e2f5759d",
+      "title": "Pringles Ad",
+      "cluster": 1,
+      "cluster_description": "This group of instances is characterized by the absence of several common content patterns, particularly those related to `idefics3forconditionalgeneration` initialization errors, generic errors, and objects like \"black\" or \"boat.\" Instead, they are defined by the consistent presence of \"Pringles\" and \"people\" within their content, often accompanied by descriptions of a \"dimly lit\" scene where people are engaged in activities around a table with Pringles.",
+      "duration_minutes": 0.5,
+      "unique_topics": 14,
+      "scene_change_rate": 20.0,
+      "topics": "[\"The image depicts a scene from a commercial for Pringles potato chips. The setting is a kitchen\", \" The image shows...\", \"image\", \" including a stove\", \" a refrigerator\", \"potato\", \" suggesting a cozy and intimate atmosphere. The kitchen is equipped with various appliances\", \"scene\", \" and a microwave. There are several people in the kitchen\", \" there is a group of people standing around a table. On the table are several containers of Pringles potato chips\", \" all of whom are engaged in different activities.\\n\\nIn the foreground\", \" which is dimly lit\", \"people\", \"pringles\"]"
+    },
+    {
+      "video_id": "4c2358e5-4a65-4b33-b23d-7f923f983787",
+      "title": "Pringles Ad 2",
+      "cluster": 1,
+      "cluster_description": "This group of instances is characterized by the absence of several common content patterns, particularly those related to `idefics3forconditionalgeneration` initialization errors, generic errors, and objects like \"black\" or \"boat.\" Instead, they are defined by the consistent presence of \"Pringles\" and \"people\" within their content, often accompanied by descriptions of a \"dimly lit\" scene where people are engaged in activities around a table with Pringles.",
+      "duration_minutes": 0.5,
+      "unique_topics": 14,
+      "scene_change_rate": 22.0,
+      "topics": "[\"The image depicts a scene from a commercial for Pringles potato chips. The setting is a kitchen\", \" The image shows...\", \"image\", \" including a stove\", \" a refrigerator\", \"potato\", \" suggesting a cozy and intimate atmosphere. The kitchen is equipped with various appliances\", \"scene\", \" and a microwave. There are several people in the kitchen\", \" there is a group of people standing around a table. On the table are several containers of Pringles potato chips\", \" all of whom are engaged in different activities.\\n\\nIn the foreground\", \" which is dimly lit\", \"people\", \"pringles\"]"
+    },
+    {
+      "video_id": "5f2fbc22-dc9e-4046-87c2-48248d5a8919",
+      "title": "Never Gonna Give You Up - Rick Astley [REIMAGINED]",
+      "cluster": 0,
+      "cluster_description": "This group of instances is characterized by a lack of advanced generation models, errors, or significant scene changes. Their descriptions also exhibit no variance, suggesting a consistent or absent descriptive element.",
+      "duration_minutes": 0.0,
+      "unique_topics": 0,
+      "scene_change_rate": 0.0,
+      "topics": "[]"
+    },
+    {
+      "video_id": "aac1851d-f7f9-416e-8138-27bdb5aa0619",
+      "title": "Coca-Cola | For Everyone :30",
+      "cluster": 5,
+      "cluster_description": "This group is primarily characterized by the absence of specific technical errors related to 'idefics3forconditionalgeneration' and general processing errors. They also exhibit very low or zero scene change rates and topic density, suggesting a more static or focused content.",
+      "duration_minutes": 0.0,
+      "unique_topics": 11,
+      "scene_change_rate": 0.0,
+      "topics": "[\" while the tilted can has a matte finish. The upright...\", \"image\", \" while the tilted can is positioned to the left of the upright can. Both cans are red and white in color\", \"glass\", \"bottle\", \"white\", \" reflective surface\", \" one of which is upright and the other is tilted to the side. The upright can is prominently displayed in the center of the image\", \"coca-cola\", \"A plastic bottle of Coca-Cola is shown with a red cap. The image depicts two Coca-Cola cans\", \" with the text \\\"Coca-Cola\\\" prominently displayed in white on the front. The upright can has a shiny\"]"
+    },
+    {
+      "video_id": "e1715818-3e71-4a2e-b666-dba002691803",
+      "title": null,
+      "cluster": 4,
+      "cluster_description": "This group is characterized by a lack of typical errors or processing issues, particularly with 'idefics3forconditionalgeneration.__init__()'. They exhibit very low scene change rates and topic density, often having a topic density of 0.",
+      "duration_minutes": 0.0,
+      "unique_topics": 12,
+      "scene_change_rate": 0.0,
+      "topics": "[\"image\", \" which is part of the house where the movie is set. The hallway is well-lit\", \" portrayed by the actor Edgardo Saverin. The scene takes place in a hallway\", \"A man is walking down a hallway in a fancy restaurant. The image depicts a scene from the movie \\\"The Social Network\", \"scene\", \" with a warm\", \"white\", \"depicts\", \" inviting atmosphere.\\n\\nEduardo is standing in the center of the hallway\", \" facing the camera. He is wearing a plaid shirt with a white A white table with a silver f...\", \"black\", \"\\\" specifically focusing on the character Eduardo Saverin\"]"
+    }
+  ]
+}
