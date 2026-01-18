@@ -527,6 +527,14 @@ export default function Page() {
                 console.log(`✅ Completed row: ${videoInfo.title}`);
                 enhanceKeyTopicsWithTavily(snippet.title, snippet.channelTitle, rowId);
                 
+                // CRITICAL FIX: Add suggested video to processing queue
+                setProcessingQueue(prev => [...prev, {
+                    url: videoUrl,
+                    rowId: rowId,
+                    title: snippet.title || "Video Title"
+                }]);
+                console.log(`📋 Added suggested video to processing queue: ${snippet.title}`);
+                
                 // Small delay before next row
                 await new Promise(resolve => setTimeout(resolve, 200));
             }
