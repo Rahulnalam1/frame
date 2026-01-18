@@ -1,0 +1,9 @@
+
+service-key.json
+__pycache__/
+uploads/
+node_modules/
+.DS_Store
+env/
+.env
+
